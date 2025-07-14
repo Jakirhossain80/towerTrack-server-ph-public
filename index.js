@@ -19,7 +19,10 @@ const port = process.env.PORT || 3000;
 
 // 🧩 Middleware
 app.use(cors({
-  origin: ["http://localhost:5173", "https://your-frontend-domain.com"],
+  origin: [
+    "http://localhost:5173", // local frontend
+    "https://towertrack-ph-assestwelve.netlify.app" // ✅ deployed frontend
+  ],
   credentials: true,
 }));
 app.use(express.json());
@@ -39,25 +42,60 @@ let db;
 let apartmentsCollection;
 let agreementsCollection;
 
+// 🔧 Clean up duplicate agreements and create unique index
+async function cleanDuplicateAgreements() {
+  const duplicates = await agreementsCollection
+    .aggregate([
+      {
+        $group: {
+          _id: "$userEmail",
+          count: { $sum: 1 },
+          docs: { $push: "$_id" },
+        },
+      },
+      { $match: { count: { $gt: 1 } } },
+    ])
+    .toArray();
+
+  for (const dup of duplicates) {
+    const idsToDelete = dup.docs.slice(1); // Keep one, delete others
+    await agreementsCollection.deleteMany({ _id: { $in: idsToDelete } });
+    console.log(`🧹 Removed ${idsToDelete.length} duplicates for ${dup._id}`);
+  }
+
+  try {
+    await agreementsCollection.createIndex({ userEmail: 1 }, { unique: true });
+    console.log("✅ Unique index created on userEmail");
+  } catch (err) {
+    console.error("❌ Index creation failed:", err);
+  }
+}
+
 async function connectDB() {
   try {
     await client.connect();
     db = client.db("towerTrackDB");
     apartmentsCollection = db.collection("apartments");
     agreementsCollection = db.collection("agreements");
+
+    // Call the cleaner here ONCE
+    await cleanDuplicateAgreements();
+
     await db.command({ ping: 1 });
     console.log("✅ Connected to MongoDB");
   } catch (err) {
     console.error("❌ MongoDB connection error:", err);
   }
 }
+
 connectDB();
 
 // 🔐 Updated JWT Endpoint (verifies Firebase token)
 app.post("/jwt", async (req, res) => {
   const { token } = req.body;
 
-  if (!token) return res.status(400).json({ error: "Firebase ID token is required" });
+  if (!token)
+    return res.status(400).json({ error: "Firebase ID token is required" });
 
   try {
     const decoded = await admin.auth().verifyIdToken(token);
@@ -113,13 +151,12 @@ app.post("/agreements", verifyJWT, async (req, res) => {
   }
 
   try {
-    const existing = await agreementsCollection.findOne({
-      userEmail,
-      apartmentNo,
-    });
+    const existingAgreement = await agreementsCollection.findOne({ userEmail });
 
-    if (existing) {
-      return res.status(409).json({ error: "Agreement already exists for this apartment" });
+    if (existingAgreement) {
+      return res
+        .status(409)
+        .json({ message: "You have already applied for an apartment." });
     }
 
     const agreement = {
@@ -136,6 +173,11 @@ app.post("/agreements", verifyJWT, async (req, res) => {
     const result = await agreementsCollection.insertOne(agreement);
     res.status(201).json({ insertedId: result.insertedId });
   } catch (error) {
+    if (error.code === 11000) {
+      return res
+        .status(409)
+        .json({ message: "Duplicate application detected." });
+    }
     res.status(500).json({ error: "Failed to submit agreement" });
   }
 });
