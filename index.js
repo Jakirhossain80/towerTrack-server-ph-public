@@ -206,6 +206,41 @@ app.get("/users/role/:email", verifyJWT, async (req, res) => {
   res.send({ role: user.role });
 });
 
+
+
+app.post("/announcements", async (req, res) => {
+  try {
+    const { title, description } = req.body;
+
+    // ✅ Basic validation
+    if (!title || !description) {
+      return res.status(400).json({ message: "Title and description are required." });
+    }
+
+    const announcementsCollection = db.collection("announcements");
+
+    // 🔁 Prepare the document
+    const announcement = {
+      title: title.trim(),
+      description: description.trim(),
+      createdAt: new Date(),
+    };
+
+    // ✅ Insert into announcements collection
+    const result = await announcementsCollection.insertOne(announcement);
+
+    res.status(201).json({
+      message: "Announcement posted successfully",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error("❌ Error inserting announcement:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+
+
 // 🚪 Logout (clear JWT cookie)
 app.post("/logout", (req, res) => {
   res.clearCookie("token", {
