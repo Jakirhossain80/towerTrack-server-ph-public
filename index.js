@@ -141,6 +141,17 @@ app.get("/apartments", async (req, res) => {
   }
 });
 
+// routes/userRoutes.js or inside index.js
+app.get("/users/role/:email", verifyJWT, async (req, res) => {
+  const email = req.params.email;
+  const user = await db.collection("users").findOne({ email });
+
+  if (!user) return res.status(404).json({ message: "User not found" });
+
+  res.send({ role: user.role });
+});
+
+
 // 📩 Protected POST /agreements route
 app.post("/agreements", verifyJWT, async (req, res) => {
   const { floorNo, blockName, apartmentNo, rent } = req.body;
