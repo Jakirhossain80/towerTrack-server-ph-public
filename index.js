@@ -5,7 +5,10 @@ const cookieParser = require("cookie-parser");
 const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const admin = require("firebase-admin");
-const serviceAccount = require("./firebase-service-account.json"); // 🔐 Ensure this is secured and gitignored
+const serviceAccount = require("./firebase-service-account.json");
+
+const app = express();
+const port = process.env.PORT || 3000;
 
 // 🔐 Initialize Firebase Admin SDK
 if (!admin.apps.length) {
@@ -14,14 +17,11 @@ if (!admin.apps.length) {
   });
 }
 
-const app = express();
-const port = process.env.PORT || 3000;
-
 // 🧩 Middleware
 app.use(cors({
   origin: [
-    "http://localhost:5173", // local frontend
-    "https://towertrack-ph-assestwelve.netlify.app" // ✅ deployed frontend
+    "http://localhost:5173",
+    "https://towertrack-ph-assestwelve.netlify.app"
   ],
   credentials: true,
 }));
@@ -41,8 +41,8 @@ const client = new MongoClient(uri, {
 let db;
 let apartmentsCollection;
 let agreementsCollection;
+let usersCollection; // ✅ users collection reference
 
-// 🔧 Clean up duplicate agreements and create unique index
 async function cleanDuplicateAgreements() {
   const duplicates = await agreementsCollection
     .aggregate([
@@ -58,7 +58,7 @@ async function cleanDuplicateAgreements() {
     .toArray();
 
   for (const dup of duplicates) {
-    const idsToDelete = dup.docs.slice(1); // Keep one, delete others
+    const idsToDelete = dup.docs.slice(1);
     await agreementsCollection.deleteMany({ _id: { $in: idsToDelete } });
     console.log(`🧹 Removed ${idsToDelete.length} duplicates for ${dup._id}`);
   }
@@ -77,8 +77,8 @@ async function connectDB() {
     db = client.db("towerTrackDB");
     apartmentsCollection = db.collection("apartments");
     agreementsCollection = db.collection("agreements");
+    usersCollection = db.collection("users"); // ✅ added here
 
-    // Call the cleaner here ONCE
     await cleanDuplicateAgreements();
 
     await db.command({ ping: 1 });
@@ -90,12 +90,22 @@ async function connectDB() {
 
 connectDB();
 
-// 🔐 Updated JWT Endpoint (verifies Firebase token)
+// 🔐 JWT Middleware
+function verifyJWT(req, res, next) {
+  const token = req.cookies.token;
+  if (!token) return res.status(401).send({ error: "Unauthorized" });
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) return res.status(403).send({ error: "Forbidden" });
+    req.decoded = decoded;
+    next();
+  });
+}
+
+// 🔐 JWT issuance endpoint (after Firebase login)
 app.post("/jwt", async (req, res) => {
   const { token } = req.body;
-
-  if (!token)
-    return res.status(400).json({ error: "Firebase ID token is required" });
+  if (!token) return res.status(400).json({ error: "Firebase ID token is required" });
 
   try {
     const decoded = await admin.auth().verifyIdToken(token);
@@ -119,18 +129,6 @@ app.post("/jwt", async (req, res) => {
   }
 });
 
-// 🔐 JWT Middleware
-function verifyJWT(req, res, next) {
-  const token = req.cookies.token;
-  if (!token) return res.status(401).send({ error: "Unauthorized" });
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-    if (err) return res.status(403).send({ error: "Forbidden" });
-    req.decoded = decoded; // Access req.decoded.email and req.decoded.name
-    next();
-  });
-}
-
 // 🏢 Public GET /apartments route
 app.get("/apartments", async (req, res) => {
   try {
@@ -141,18 +139,7 @@ app.get("/apartments", async (req, res) => {
   }
 });
 
-// routes/userRoutes.js or inside index.js
-app.get("/users/role/:email", verifyJWT, async (req, res) => {
-  const email = req.params.email;
-  const user = await db.collection("users").findOne({ email });
-
-  if (!user) return res.status(404).json({ message: "User not found" });
-
-  res.send({ role: user.role });
-});
-
-
-// 📩 Protected POST /agreements route
+// 📩 Protected POST /agreements
 app.post("/agreements", verifyJWT, async (req, res) => {
   const { floorNo, blockName, apartmentNo, rent } = req.body;
   const { email: userEmail, name: userName } = req.decoded;
@@ -165,9 +152,7 @@ app.post("/agreements", verifyJWT, async (req, res) => {
     const existingAgreement = await agreementsCollection.findOne({ userEmail });
 
     if (existingAgreement) {
-      return res
-        .status(409)
-        .json({ message: "You have already applied for an apartment." });
+      return res.status(409).json({ message: "You have already applied for an apartment." });
     }
 
     const agreement = {
@@ -185,15 +170,43 @@ app.post("/agreements", verifyJWT, async (req, res) => {
     res.status(201).json({ insertedId: result.insertedId });
   } catch (error) {
     if (error.code === 11000) {
-      return res
-        .status(409)
-        .json({ message: "Duplicate application detected." });
+      return res.status(409).json({ message: "Duplicate application detected." });
     }
     res.status(500).json({ error: "Failed to submit agreement" });
   }
 });
 
-// 🚪 Logout
+// ✅ 🔐 POST /users — Add user if not exists
+app.post("/users", verifyJWT, async (req, res) => {
+  try {
+    const { email, name, role } = req.body;
+    if (!email || !name) return res.status(400).json({ message: "Missing fields" });
+
+    const existingUser = await usersCollection.findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({ message: "User already exists" });
+    }
+
+    const newUser = { email, name, role: role || "user" };
+    const result = await usersCollection.insertOne(newUser);
+    res.status(201).json({ message: "User created", insertedId: result.insertedId });
+  } catch (err) {
+    console.error("Error creating user:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// 🔍 GET /users/role/:email — Get user role
+app.get("/users/role/:email", verifyJWT, async (req, res) => {
+  const email = req.params.email;
+  const user = await usersCollection.findOne({ email });
+
+  if (!user) return res.status(404).json({ message: "User not found" });
+
+  res.send({ role: user.role });
+});
+
+// 🚪 Logout (clear JWT cookie)
 app.post("/logout", (req, res) => {
   res.clearCookie("token", {
     httpOnly: true,
