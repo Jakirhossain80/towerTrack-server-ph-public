@@ -396,6 +396,29 @@ app.patch("/agreements/:id/status", verifyJWT, async (req, res) => {
 });
 
 
+app.patch("/users/role", verifyJWT, async (req, res) => {
+  const { email, role } = req.body;
+
+  if (!email || !role) {
+    return res.status(400).json({ message: "Missing email or role" });
+  }
+
+  try {
+    const result = await db.collection("users").updateOne(
+      { email },
+      { $set: { role, updatedAt: new Date() } }
+    );
+
+    if (result.modifiedCount > 0) {
+      res.send({ message: "User role updated" });
+    } else {
+      res.status(404).json({ message: "User not found or role unchanged" });
+    }
+  } catch (err) {
+    console.error("PATCH /users/role error:", err);
+    res.status(500).json({ message: "Failed to update user role" });
+  }
+});
 
 
 
