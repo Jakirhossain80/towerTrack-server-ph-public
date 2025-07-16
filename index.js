@@ -357,6 +357,19 @@ app.get("/announcements", async (req, res) => {
   }
 });
 
+app.get("/agreements", verifyJWT, async (req, res) => {
+  try {
+    const status = req.query.status;
+    const query = status ? { status } : {};
+    const agreements = await db.collection("agreements").find(query).sort({ createdAt: -1 }).toArray();
+    res.send(agreements);
+  } catch (err) {
+    console.error("GET /agreements error:", err);
+    res.status(500).json({ message: "Failed to fetch agreements" });
+  }
+});
+
+
 
 
 
