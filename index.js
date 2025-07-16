@@ -277,6 +277,39 @@ app.get('/coupons', verifyJWT, async (req, res) => {
 
 
 
+app.patch('/coupons/:id', verifyJWT, async (req, res) => {
+  const { id } = req.params;
+  const { title, description, discount, validTill, code } = req.body;
+
+  if (!title || !description || !discount || !validTill || !code) {
+    return res.status(400).json({ message: "Missing required fields" });
+  }
+
+  try {
+    const result = await db.collection("coupons").updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          title,
+          description,
+          discount: Number(discount),
+          validTill,
+          code,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    if (result.modifiedCount > 0) {
+      res.send({ message: "Coupon updated" });
+    } else {
+      res.status(404).json({ message: "Coupon not found or unchanged" });
+    }
+  } catch (err) {
+    console.error("PATCH /coupons/:id error:", err);
+    res.status(500).json({ message: "Failed to update coupon" });
+  }
+});
 
 
 
