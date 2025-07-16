@@ -370,6 +370,30 @@ app.get("/agreements", verifyJWT, async (req, res) => {
 });
 
 
+app.patch("/agreements/:id/status", verifyJWT, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({ message: "Missing status field" });
+  }
+
+  try {
+    const result = await db.collection("agreements").updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status, updatedAt: new Date() } }
+    );
+
+    if (result.modifiedCount > 0) {
+      res.send({ message: "Agreement status updated" });
+    } else {
+      res.status(404).json({ message: "Agreement not found or unchanged" });
+    }
+  } catch (err) {
+    console.error("PATCH /agreements/:id/status error:", err);
+    res.status(500).json({ message: "Failed to update agreement status" });
+  }
+});
 
 
 
