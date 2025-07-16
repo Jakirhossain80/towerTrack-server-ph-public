@@ -312,6 +312,21 @@ app.patch('/coupons/:id', verifyJWT, async (req, res) => {
 });
 
 
+app.delete('/coupons/:id', verifyJWT, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await db.collection("coupons").deleteOne({ _id: new ObjectId(id) });
+    if (result.deletedCount > 0) {
+      res.send({ message: "Coupon deleted" });
+    } else {
+      res.status(404).json({ message: "Coupon not found" });
+    }
+  } catch (err) {
+    console.error("DELETE /coupons/:id error:", err);
+    res.status(500).json({ message: "Failed to delete coupon" });
+  }
+});
 
 
 
