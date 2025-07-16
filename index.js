@@ -329,6 +329,24 @@ app.delete('/coupons/:id', verifyJWT, async (req, res) => {
 });
 
 
+// GET /announcements
+app.get("/announcements", async (req, res) => {
+  try {
+    const announcements = await db
+      .collection("announcements")
+      .find()
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).json(announcements);
+  } catch (error) {
+    console.error("GET /announcements error:", error);
+    res.status(500).json({ message: "Failed to fetch announcements" });
+  }
+});
+
+
+
 
 
 
