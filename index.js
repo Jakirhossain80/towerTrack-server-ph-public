@@ -18,13 +18,15 @@ if (!admin.apps.length) {
 }
 
 // 🧩 Middleware
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://towertrack-ph-assestwelve.netlify.app"
-  ],
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://towertrack-ph-assestwelve.netlify.app",
+    ],
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(cookieParser());
 
@@ -105,7 +107,8 @@ function verifyJWT(req, res, next) {
 // 🔐 JWT issuance endpoint (after Firebase login)
 app.post("/jwt", async (req, res) => {
   const { token } = req.body;
-  if (!token) return res.status(400).json({ error: "Firebase ID token is required" });
+  if (!token)
+    return res.status(400).json({ error: "Firebase ID token is required" });
 
   try {
     const decoded = await admin.auth().verifyIdToken(token);
@@ -152,7 +155,9 @@ app.post("/agreements", verifyJWT, async (req, res) => {
     const existingAgreement = await agreementsCollection.findOne({ userEmail });
 
     if (existingAgreement) {
-      return res.status(409).json({ message: "You have already applied for an apartment." });
+      return res
+        .status(409)
+        .json({ message: "You have already applied for an apartment." });
     }
 
     const agreement = {
@@ -170,7 +175,9 @@ app.post("/agreements", verifyJWT, async (req, res) => {
     res.status(201).json({ insertedId: result.insertedId });
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(409).json({ message: "Duplicate application detected." });
+      return res
+        .status(409)
+        .json({ message: "Duplicate application detected." });
     }
     res.status(500).json({ error: "Failed to submit agreement" });
   }
@@ -180,7 +187,8 @@ app.post("/agreements", verifyJWT, async (req, res) => {
 app.post("/users", verifyJWT, async (req, res) => {
   try {
     const { email, name, role } = req.body;
-    if (!email || !name) return res.status(400).json({ message: "Missing fields" });
+    if (!email || !name)
+      return res.status(400).json({ message: "Missing fields" });
 
     const existingUser = await usersCollection.findOne({ email });
     if (existingUser) {
@@ -189,7 +197,9 @@ app.post("/users", verifyJWT, async (req, res) => {
 
     const newUser = { email, name, role: role || "user" };
     const result = await usersCollection.insertOne(newUser);
-    res.status(201).json({ message: "User created", insertedId: result.insertedId });
+    res
+      .status(201)
+      .json({ message: "User created", insertedId: result.insertedId });
   } catch (err) {
     console.error("Error creating user:", err);
     res.status(500).json({ message: "Internal server error" });
@@ -206,15 +216,15 @@ app.get("/users/role/:email", verifyJWT, async (req, res) => {
   res.send({ role: user.role });
 });
 
-
-
 app.post("/announcements", async (req, res) => {
   try {
     const { title, description } = req.body;
 
     // ✅ Basic validation
     if (!title || !description) {
-      return res.status(400).json({ message: "Title and description are required." });
+      return res
+        .status(400)
+        .json({ message: "Title and description are required." });
     }
 
     const announcementsCollection = db.collection("announcements");
@@ -239,8 +249,7 @@ app.post("/announcements", async (req, res) => {
   }
 });
 
-
-app.post('/coupons', verifyJWT, async (req, res) => {
+app.post("/coupons", verifyJWT, async (req, res) => {
   try {
     const { title, description, discount, validTill, code } = req.body;
     if (!title || !description || !discount || !validTill || !code) {
@@ -257,17 +266,22 @@ app.post('/coupons', verifyJWT, async (req, res) => {
     };
 
     const result = await db.collection("coupons").insertOne(coupon);
-    res.status(201).json({ message: "Coupon created", insertedId: result.insertedId });
+    res
+      .status(201)
+      .json({ message: "Coupon created", insertedId: result.insertedId });
   } catch (err) {
     console.error("POST /coupons error:", err);
     res.status(500).json({ message: "Failed to create coupon" });
   }
 });
 
-
-app.get('/coupons', verifyJWT, async (req, res) => {
+app.get("/coupons", verifyJWT, async (req, res) => {
   try {
-    const coupons = await db.collection("coupons").find().sort({ createdAt: -1 }).toArray();
+    const coupons = await db
+      .collection("coupons")
+      .find()
+      .sort({ createdAt: -1 })
+      .toArray();
     res.send(coupons);
   } catch (err) {
     console.error("GET /coupons error:", err);
@@ -275,9 +289,7 @@ app.get('/coupons', verifyJWT, async (req, res) => {
   }
 });
 
-
-
-app.patch('/coupons/:id', verifyJWT, async (req, res) => {
+app.patch("/coupons/:id", verifyJWT, async (req, res) => {
   const { id } = req.params;
   const { title, description, discount, validTill, code } = req.body;
 
@@ -311,12 +323,13 @@ app.patch('/coupons/:id', verifyJWT, async (req, res) => {
   }
 });
 
-
-app.delete('/coupons/:id', verifyJWT, async (req, res) => {
+app.delete("/coupons/:id", verifyJWT, async (req, res) => {
   const { id } = req.params;
 
   try {
-    const result = await db.collection("coupons").deleteOne({ _id: new ObjectId(id) });
+    const result = await db
+      .collection("coupons")
+      .deleteOne({ _id: new ObjectId(id) });
     if (result.deletedCount > 0) {
       res.send({ message: "Coupon deleted" });
     } else {
@@ -327,7 +340,6 @@ app.delete('/coupons/:id', verifyJWT, async (req, res) => {
     res.status(500).json({ message: "Failed to delete coupon" });
   }
 });
-
 
 // GET /announcements
 app.get("/announcements", async (req, res) => {
@@ -344,6 +356,7 @@ app.get("/announcements", async (req, res) => {
     res.status(500).json({ message: "Failed to fetch announcements" });
   }
 });
+
 
 
 
