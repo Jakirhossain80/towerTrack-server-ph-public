@@ -265,6 +265,15 @@ app.post('/coupons', verifyJWT, async (req, res) => {
 });
 
 
+app.get('/coupons', verifyJWT, async (req, res) => {
+  try {
+    const coupons = await db.collection("coupons").find().sort({ createdAt: -1 }).toArray();
+    res.send(coupons);
+  } catch (err) {
+    console.error("GET /coupons error:", err);
+    res.status(500).json({ message: "Failed to fetch coupons" });
+  }
+});
 
 
 
