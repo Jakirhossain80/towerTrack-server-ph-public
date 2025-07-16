@@ -240,6 +240,44 @@ app.post("/announcements", async (req, res) => {
 });
 
 
+app.post('/coupons', verifyJWT, async (req, res) => {
+  try {
+    const { title, description, discount, validTill, code } = req.body;
+    if (!title || !description || !discount || !validTill || !code) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const coupon = {
+      title,
+      description,
+      discount: Number(discount),
+      validTill,
+      code,
+      createdAt: new Date(),
+    };
+
+    const result = await db.collection("coupons").insertOne(coupon);
+    res.status(201).json({ message: "Coupon created", insertedId: result.insertedId });
+  } catch (err) {
+    console.error("POST /coupons error:", err);
+    res.status(500).json({ message: "Failed to create coupon" });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // 🚪 Logout (clear JWT cookie)
 app.post("/logout", (req, res) => {
