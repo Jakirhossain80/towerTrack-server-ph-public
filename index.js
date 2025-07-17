@@ -151,6 +151,17 @@ app.post("/agreements", verifyJWT, async (req, res) => {
   }
 });
 
+// ✅ GET all agreements
+app.get("/agreements", async (req, res) => {
+  try {
+    const agreements = await db.collection("agreements").find().toArray();
+    res.send(agreements);
+  } catch (error) {
+    console.error("Error fetching agreements:", error);
+    res.status(500).send({ message: "Failed to fetch agreements" });
+  }
+});
+
 app.post("/users", verifyJWT, async (req, res) => {
   const { email, name, role } = req.body;
   if (!email || !name) return res.status(400).json({ message: "Missing fields" });
@@ -181,6 +192,17 @@ app.post("/announcements", async (req, res) => {
   });
 
   res.status(201).json({ message: "Announcement posted", insertedId: result.insertedId });
+});
+
+// ✅ GET all users
+app.get("/users", async (req, res) => {
+  try {
+    const users = await db.collection("users").find().toArray();
+    res.send(users);
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).send({ message: "Failed to fetch users" });
+  }
 });
 
 app.get("/announcements", async (req, res) => {
