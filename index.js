@@ -112,12 +112,14 @@ app.post("/jwt", async (req, res) => {
   }
 });
 
+// ✅ GET all apartments
 app.get("/apartments", async (req, res) => {
   try {
-    const apartments = await apartmentsCollection.find().toArray();
+    const apartments = await db.collection("apartments").find().toArray();
     res.send(apartments);
   } catch (error) {
-    res.status(500).send({ error: "Failed to fetch apartments" });
+    console.error("Error fetching apartments:", error);
+    res.status(500).send({ message: "Failed to fetch apartments" });
   }
 });
 
@@ -263,14 +265,32 @@ app.patch("/users/role", verifyJWT, async (req, res) => {
   else res.status(404).json({ message: "User not found or role unchanged" });
 });
 
+
+
 app.get("/agreements/member/:email", async (req, res) => {
-  const agreement = await agreementsCollection.findOne({
-    userEmail: req.params.email,
-    status: "checked",
-  });
-  if (!agreement) return res.status(404).send({ message: "No agreement found" });
-  res.send(agreement);
+  try {
+    const email = req.params.email;
+
+    const agreement = await db.collection("agreements").findOne({
+      userEmail: { $regex: new RegExp(`^${email}$`, "i") },
+      status: "checked",
+    });
+
+    console.log("Agreement Found:", agreement);
+
+    if (!agreement) {
+      return res.status(200).send(null);
+    }
+
+    res.send(agreement);
+  } catch (error) {
+    console.error("GET /agreements/member/:email error:", error);
+    res.status(500).send({ message: "Failed to fetch agreement" });
+  }
 });
+
+
+
 
 app.get("/users/:email", async (req, res) => {
   try {
