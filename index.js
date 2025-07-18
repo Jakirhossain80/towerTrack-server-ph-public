@@ -242,6 +242,18 @@ app.get("/users/role/:email", verifyJWT, async (req, res) => {
   res.send({ role: user.role });
 });
 
+// PATCH /users/:email → change user role
+app.patch("/users/:email", async (req, res) => {
+  const email = req.params.email;
+  const updatedRole = req.body.role;
+  const result = await db.collection("users").updateOne(
+    { email },
+    { $set: { role: updatedRole } }
+  );
+  res.send(result);
+});
+
+
 app.patch("/users/role", verifyJWT, async (req, res) => {
   const { email, role } = req.body;
   if (!email || !role) return res.status(400).json({ message: "Missing fields" });
