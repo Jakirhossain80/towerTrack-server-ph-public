@@ -345,6 +345,50 @@ app.delete("/coupons/:id", verifyJWT, async (req, res) => {
   else res.status(404).json({ message: "Coupon not found" });
 });
 
+
+
+app.get("/agreements/:email", verifyJWT, async (req, res) => {
+  try {
+    const email = req.params.email;
+    const agreement = await agreementsCollection.findOne({
+      userEmail: { $regex: new RegExp(`^${email}$`, "i") },
+      status: "checked",
+    });
+    res.send(agreement || {});
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch agreement" });
+  }
+});
+
+
+app.post("/validate-coupon", verifyJWT, async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ valid: false, message: "Missing code" });
+
+    const coupon = await db.collection("coupons").findOne({ code: code.toUpperCase() });
+    if (!coupon) return res.send({ valid: false });
+
+    const today = new Date();
+    const validTill = new Date(coupon.validTill);
+    if (validTill >= today) {
+      return res.send({
+        valid: true,
+        discountPercentage: coupon.discount,
+      });
+    }
+
+    res.send({ valid: false });
+  } catch (err) {
+    res.status(500).json({ message: "Coupon validation error" });
+  }
+});
+
+
+
+
+
+
 // ===================== ⚙️ Base =====================
 app.get("/", (req, res) => {
   res.send("Hello TowerTrack World!");
