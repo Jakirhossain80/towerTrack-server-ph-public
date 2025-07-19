@@ -428,6 +428,48 @@ app.get("/payments/user/:email", verifyJWT, async (req, res) => {
   }
 });
 
+// POST /notices/issue → Issue a new notice if rent not paid
+app.post("/notices/issue", verifyJWT, async (req, res) => {
+  const { userEmail, apartmentId, reason, month } = req.body;
+
+  const noticeCount = await db.collection("notices").countDocuments({
+    userEmail,
+    status: "active"
+  });
+
+  const notice = {
+    userEmail,
+    apartmentId,
+    reason,
+    noticeCount: noticeCount + 1,
+    status: "active",
+    date: new Date(),
+  };
+
+  await db.collection("notices").insertOne(notice);
+
+  if (notice.noticeCount >= 3) {
+    await db.collection("agreements").deleteOne({ userEmail });
+    await db.collection("users").updateOne(
+      { email: userEmail },
+      { $set: { role: "user" } }
+    );
+  }
+
+  res.status(201).send({ message: "Notice issued", notice });
+});
+
+// GET /notices/user/:email → Fetch user's notices
+app.get("/notices/user/:email", verifyJWT, async (req, res) => {
+  const notices = await db
+    .collection("notices")
+    .find({ userEmail: req.params.email })
+    .sort({ date: -1 })
+    .toArray();
+  res.send(notices);
+});
+
+
 
 
 
