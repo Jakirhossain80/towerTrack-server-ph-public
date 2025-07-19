@@ -8,6 +8,8 @@ const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const admin = require("firebase-admin");
 const serviceAccount = require("./firebase-service-account.json");
+const Stripe = require("stripe");
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -383,6 +385,50 @@ app.post("/validate-coupon", verifyJWT, async (req, res) => {
     res.status(500).json({ message: "Coupon validation error" });
   }
 });
+
+
+app.post("/create-payment-intent", verifyJWT, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: parseInt(amount) * 100,
+      currency: "bdt",
+      payment_method_types: ["card"],
+    });
+    res.send(paymentIntent.client_secret);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/payments", verifyJWT, async (req, res) => {
+  try {
+    const payment = req.body;
+    const result = await db.collection("payments").insertOne(payment);
+    res.status(201).json({ insertedId: result.insertedId });
+  } catch (err) {
+    res.status(500).json({ error: "Payment saving failed" });
+  }
+});
+
+// 🔐 Protected route to fetch payments for the logged-in user
+app.get("/payments/user/:email", verifyJWT, async (req, res) => {
+  const email = req.params.email;
+
+  try {
+    const payments = await db
+      .collection("payments")
+      .find({ email })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(payments);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch payments" });
+  }
+});
+
+
 
 
 
