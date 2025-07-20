@@ -470,13 +470,6 @@ app.get("/notices/user/:email", verifyJWT, async (req, res) => {
 });
 
 
-
-
-
-
-
-
-
 // ===================== ⚙️ Base =====================
 app.get("/", (req, res) => {
   res.send("Hello TowerTrack World!");
