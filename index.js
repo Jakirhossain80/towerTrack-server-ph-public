@@ -82,7 +82,7 @@ function verifyJWT(req, res, next) {
   });
 }
 
-// Optional JWT (for GET routes)
+// ✅ Optional JWT (for GET routes)
 function optionalJWT(req, res, next) {
   const token = req.cookies.token;
   if (!token) return next();
@@ -90,6 +90,19 @@ function optionalJWT(req, res, next) {
     if (!err) req.decoded = decoded;
     next();
   });
+}
+
+// ✅ Middleware to verify admin role
+async function verifyAdmin(req, res, next) {
+  try {
+    const user = await usersCollection.findOne({ email: req.decoded.email });
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden: Admins only" });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: "Admin check failed" });
+  }
 }
 
 // ===================== 🔐 Auth Routes =====================
@@ -166,7 +179,6 @@ app.post("/agreements", verifyJWT, async (req, res) => {
   }
 });
 
-// ✅ Unified GET agreement (protected but no duplication)
 app.get("/agreements", optionalJWT, async (req, res) => {
   try {
     const status = req.query.status;
@@ -187,6 +199,19 @@ app.get("/agreements/member/:email", async (req, res) => {
     res.send(agreement || null);
   } catch (err) {
     res.status(500).send({ message: "Failed to fetch agreement" });
+  }
+});
+
+app.get("/agreements/:email", verifyJWT, async (req, res) => {
+  try {
+    const email = req.params.email;
+    const agreement = await agreementsCollection.findOne({
+      userEmail: { $regex: new RegExp(`^${email}$`, "i") },
+      status: "checked",
+    });
+    res.send(agreement || {});
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch agreement" });
   }
 });
 
@@ -244,7 +269,6 @@ app.get("/users/role/:email", verifyJWT, async (req, res) => {
   res.send({ role: user.role });
 });
 
-// PATCH /users/:email → change user role
 app.patch("/users/:email", async (req, res) => {
   const email = req.params.email;
   const updatedRole = req.body.role;
@@ -254,7 +278,6 @@ app.patch("/users/:email", async (req, res) => {
   );
   res.send(result);
 });
-
 
 app.patch("/users/role", verifyJWT, async (req, res) => {
   const { email, role } = req.body;
@@ -312,7 +335,8 @@ app.post("/coupons", verifyJWT, async (req, res) => {
   res.status(201).json({ insertedId: result.insertedId });
 });
 
-app.get("/coupons", verifyJWT, async (req, res) => {
+// 🛠️ Require both JWT and Admin for this route
+app.get("/coupons", verifyJWT, verifyAdmin, async (req, res) => {
   try {
     const coupons = await db.collection("coupons").find().sort({ createdAt: -1 }).toArray();
     res.send(coupons);
@@ -347,22 +371,6 @@ app.delete("/coupons/:id", verifyJWT, async (req, res) => {
   else res.status(404).json({ message: "Coupon not found" });
 });
 
-
-
-app.get("/agreements/:email", verifyJWT, async (req, res) => {
-  try {
-    const email = req.params.email;
-    const agreement = await agreementsCollection.findOne({
-      userEmail: { $regex: new RegExp(`^${email}$`, "i") },
-      status: "checked",
-    });
-    res.send(agreement || {});
-  } catch (err) {
-    res.status(500).json({ message: "Failed to fetch agreement" });
-  }
-});
-
-
 app.post("/validate-coupon", verifyJWT, async (req, res) => {
   try {
     const { code } = req.body;
@@ -386,7 +394,7 @@ app.post("/validate-coupon", verifyJWT, async (req, res) => {
   }
 });
 
-
+// ===================== 💳 Payments =====================
 app.post("/create-payment-intent", verifyJWT, async (req, res) => {
   try {
     const { amount } = req.body;
@@ -411,7 +419,6 @@ app.post("/payments", verifyJWT, async (req, res) => {
   }
 });
 
-// 🔐 Protected route to fetch payments for the logged-in user
 app.get("/payments/user/:email", verifyJWT, async (req, res) => {
   const email = req.params.email;
 
@@ -428,7 +435,7 @@ app.get("/payments/user/:email", verifyJWT, async (req, res) => {
   }
 });
 
-// POST /notices/issue → Issue a new notice if rent not paid
+// ===================== 🚨 Notices =====================
 app.post("/notices/issue", verifyJWT, async (req, res) => {
   const { userEmail, apartmentId, reason, month } = req.body;
 
@@ -459,7 +466,6 @@ app.post("/notices/issue", verifyJWT, async (req, res) => {
   res.status(201).send({ message: "Notice issued", notice });
 });
 
-// GET /notices/user/:email → Fetch user's notices
 app.get("/notices/user/:email", verifyJWT, async (req, res) => {
   const notices = await db
     .collection("notices")
@@ -468,7 +474,6 @@ app.get("/notices/user/:email", verifyJWT, async (req, res) => {
     .toArray();
   res.send(notices);
 });
-
 
 // ===================== ⚙️ Base =====================
 app.get("/", (req, res) => {
