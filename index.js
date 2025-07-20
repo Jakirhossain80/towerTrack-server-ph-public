@@ -38,7 +38,7 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 let db, apartmentsCollection, agreementsCollection, usersCollection;
 
 async function connectDB() {
-  await client.connect();
+  //await client.connect();
   db = client.db("towerTrackDB");
   apartmentsCollection = db.collection("apartments");
   agreementsCollection = db.collection("agreements");
