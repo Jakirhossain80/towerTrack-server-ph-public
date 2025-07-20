@@ -475,6 +475,18 @@ app.get("/notices/user/:email", verifyJWT, async (req, res) => {
   res.send(notices);
 });
 
+
+// ✅ Public route for Coupons
+app.get("/public/coupons", async (req, res) => {
+  try {
+    const coupons = await db.collection("coupons").find().toArray();
+    res.send(coupons);
+  } catch (err) {
+    res.status(500).send({ error: "Failed to fetch public coupons" });
+  }
+});
+
+
 // ===================== ⚙️ Base =====================
 app.get("/", (req, res) => {
   res.send("Hello TowerTrack World!");
