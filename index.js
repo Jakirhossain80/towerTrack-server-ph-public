@@ -125,8 +125,11 @@ app.post("/jwt", async (req, res) => {
       maxAge: 1000 * 60 * 60 * 24 * 2,
     });
 
+    console.log("✅ JWT issued and cookie set");
+
     res.send({ success: true });
   } catch (err) {
+     console.error("❌ Invalid Firebase token", err);
     res.status(401).json({ error: "Invalid Firebase token" });
   }
 });
