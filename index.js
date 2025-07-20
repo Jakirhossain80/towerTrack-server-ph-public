@@ -115,7 +115,7 @@ app.post("/jwt", async (req, res) => {
     const jwtToken = jwt.sign(
       { email: decoded.email, name: decoded.name },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || "2d" }
+      //{ expiresIn: process.env.JWT_EXPIRES_IN || "2d" }
     );
 
     res.cookie("token", jwtToken, {
