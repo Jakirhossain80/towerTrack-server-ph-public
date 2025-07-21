@@ -1,7 +1,6 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const cookieParser = require("cookie-parser");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const Stripe = require("stripe");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
@@ -9,18 +8,23 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://towertrack-ph-assestwelve.netlify.app"
-  ],
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://towertrack-ph-assestwelve.netlify.app",
+    ],
+    credentials: true,
+  })
+);
 app.use(express.json());
-app.use(cookieParser());
 
 const client = new MongoClient(process.env.MONGODB_URI, {
-  serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
 });
 
 let db, apartmentsCollection, agreementsCollection, usersCollection;
@@ -36,10 +40,18 @@ async function connectDB() {
 }
 
 async function cleanDuplicateAgreements() {
-  const duplicates = await agreementsCollection.aggregate([
-    { $group: { _id: "$userEmail", count: { $sum: 1 }, docs: { $push: "$_id" } } },
-    { $match: { count: { $gt: 1 } } },
-  ]).toArray();
+  const duplicates = await agreementsCollection
+    .aggregate([
+      {
+        $group: {
+          _id: "$userEmail",
+          count: { $sum: 1 },
+          docs: { $push: "$_id" },
+        },
+      },
+      { $match: { count: { $gt: 1 } } },
+    ])
+    .toArray();
 
   for (const dup of duplicates) {
     const idsToDelete = dup.docs.slice(1);
@@ -70,7 +82,11 @@ app.get("/apartments", async (req, res) => {
 // ===================== 🎟️ Public Coupons =====================
 app.get("/public/coupons", async (req, res) => {
   try {
-    const coupons = await db.collection("coupons").find().sort({ validTill: 1 }).toArray();
+    const coupons = await db
+      .collection("coupons")
+      .find()
+      .sort({ validTill: 1 })
+      .toArray();
     res.send(coupons);
   } catch (err) {
     console.error("❌ Failed to fetch coupons:", err);
@@ -80,9 +96,11 @@ app.get("/public/coupons", async (req, res) => {
 
 // ===================== 🧾 Agreements =====================
 app.post("/agreements", async (req, res) => {
-  const { floorNo, blockName, apartmentNo, rent, userEmail, userName } = req.body;
+  const { floorNo, blockName, apartmentNo, rent, userEmail, userName } =
+    req.body;
 
-  if (!userEmail || !userName) return res.status(400).json({ error: "Missing user info" });
+  if (!userEmail || !userName)
+    return res.status(400).json({ error: "Missing user info" });
 
   const existing = await agreementsCollection.findOne({ userEmail });
   if (existing) return res.status(409).json({ message: "Already applied" });
@@ -110,7 +128,10 @@ app.get("/agreements", async (req, res) => {
   try {
     const status = req.query.status;
     const query = status ? { status } : {};
-    const data = await agreementsCollection.find(query).sort({ createdAt: -1 }).toArray();
+    const data = await agreementsCollection
+      .find(query)
+      .sort({ createdAt: -1 })
+      .toArray();
     res.send(data);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch agreements" });
@@ -132,7 +153,8 @@ app.get("/agreements/member/:email", async (req, res) => {
 // ===================== 👤 Users =====================
 app.post("/users", async (req, res) => {
   const { email, name, role } = req.body;
-  if (!email || !name) return res.status(400).json({ message: "Missing fields" });
+  if (!email || !name)
+    return res.status(400).json({ message: "Missing fields" });
 
   const existing = await usersCollection.findOne({ email });
   if (existing) return res.status(409).json({ message: "User already exists" });
@@ -191,7 +213,11 @@ app.post("/announcements", async (req, res) => {
 
 app.get("/announcements", async (req, res) => {
   try {
-    const data = await db.collection("announcements").find().sort({ createdAt: -1 }).toArray();
+    const data = await db
+      .collection("announcements")
+      .find()
+      .sort({ createdAt: -1 })
+      .toArray();
     res.send(data);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch announcements" });
@@ -245,7 +271,7 @@ app.post("/notices/issue", async (req, res) => {
 
   const noticeCount = await db.collection("notices").countDocuments({
     userEmail,
-    status: "active"
+    status: "active",
   });
 
   const notice = {
