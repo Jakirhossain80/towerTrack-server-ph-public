@@ -118,12 +118,13 @@ app.post("/jwt", async (req, res) => {
       //{ expiresIn: process.env.JWT_EXPIRES_IN || "2d" }
     );
 
-    res.cookie("token", jwtToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 1000 * 60 * 60 * 24 * 2,
-    });
+   res.cookie("token", jwtToken, {
+  httpOnly: true,
+  secure: true,
+  sameSite: "None",
+  maxAge: 1000 * 60 * 60 * 24 * 2,
+});
+
 
     console.log("✅ JWT issued and cookie set");
 
