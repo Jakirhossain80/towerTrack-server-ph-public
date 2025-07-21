@@ -1,5 +1,3 @@
-// ✅ JWT-Free Express.js Server for TowerTrack
-
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -74,6 +72,18 @@ app.get("/apartments", async (req, res) => {
     res.status(500).send({ message: "Failed to fetch apartments" });
   }
 });
+
+// ===================== 🎟️ Public Coupons =====================
+app.get("/public/coupons", async (req, res) => {
+  try {
+    const coupons = await db.collection("coupons").find().sort({ validTill: 1 }).toArray();
+    res.send(coupons);
+  } catch (err) {
+    console.error("❌ Failed to fetch coupons:", err);
+    res.status(500).json({ error: "Failed to fetch coupons" });
+  }
+});
+
 
 // ===================== 🧾 Agreements =====================
 app.post("/agreements", async (req, res) => {
