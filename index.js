@@ -3,8 +3,6 @@ const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-const admin = require("firebase-admin");
-const serviceAccount = require("./firebase-service-account.json");
 const Stripe = require("stripe");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -20,12 +18,6 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(cookieParser());
-
-if (!admin.apps.length) {
-  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-}
-
-
 
 const client = new MongoClient(process.env.MONGODB_URI, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
@@ -85,7 +77,6 @@ app.get("/public/coupons", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch coupons" });
   }
 });
-
 
 // ===================== 🧾 Agreements =====================
 app.post("/agreements", async (req, res) => {
