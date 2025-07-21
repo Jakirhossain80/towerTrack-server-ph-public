@@ -20,6 +20,7 @@ if (!admin.apps.length) {
 }
 
 // ✅ Middleware
+
 app.use(cors({
   origin: [
     "http://localhost:5173",
