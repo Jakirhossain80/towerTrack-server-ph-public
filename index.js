@@ -115,25 +115,25 @@ app.post("/jwt", async (req, res) => {
     const jwtToken = jwt.sign(
       { email: decoded.email, name: decoded.name },
       process.env.JWT_SECRET,
-      //{ expiresIn: process.env.JWT_EXPIRES_IN || "2d" }
+      { expiresIn: "2d" } // ✅ Include expiration
     );
 
-   res.cookie("token", jwtToken, {
-  httpOnly: true,
-  secure: true,
-  sameSite: "None",
-  maxAge: 1000 * 60 * 60 * 24 * 2,
-});
-
+    res.cookie("token", jwtToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "None",
+      maxAge: 1000 * 60 * 60 * 24 * 2, // 2 days
+    });
 
     console.log("✅ JWT issued and cookie set");
 
     res.send({ success: true });
   } catch (err) {
-     console.error("❌ Invalid Firebase token", err);
+    console.error("❌ Invalid Firebase token", err);
     res.status(401).json({ error: "Invalid Firebase token" });
   }
 });
+
 
 app.post("/logout", (req, res) => {
   res.clearCookie("token", {
