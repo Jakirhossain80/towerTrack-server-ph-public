@@ -11,10 +11,6 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 3000;
 
-if (!admin.apps.length) {
-  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-}
-
 app.use(cors({
   origin: [
     "http://localhost:5173",
@@ -24,6 +20,12 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(cookieParser());
+
+if (!admin.apps.length) {
+  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+}
+
+
 
 const client = new MongoClient(process.env.MONGODB_URI, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
