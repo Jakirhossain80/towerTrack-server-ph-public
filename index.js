@@ -196,6 +196,24 @@ app.patch("/users/:email", async (req, res) => {
   res.send(result);
 });
 
+// ===================== 🔑 Get User Role by Email =====================
+app.get("/users/role/:email", async (req, res) => {
+  const email = req.params.email;
+
+  try {
+    const user = await usersCollection.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ role: user.role || "user" });
+  } catch (err) {
+    console.error("❌ Failed to fetch user role:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
 // ===================== 📣 Announcements =====================
 app.post("/announcements", async (req, res) => {
   const { title, description } = req.body;
