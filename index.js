@@ -150,6 +150,33 @@ app.get("/agreements/member/:email", async (req, res) => {
   }
 });
 
+// ✅ PATCH: Update agreement status by ID
+app.patch("/agreements/:id/status", async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({ message: "Status is required" });
+  }
+
+  try {
+    const result = await agreementsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Agreement not found" });
+    }
+
+    res.json({ message: "Agreement status updated", modifiedCount: result.modifiedCount });
+  } catch (error) {
+    console.error("❌ Failed to update agreement:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+
 // ===================== 👤 Users =====================
 app.post("/users", async (req, res) => {
   const { email, name, role } = req.body;
