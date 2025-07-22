@@ -197,16 +197,16 @@ app.patch("/users/:email", async (req, res) => {
 });
 
 // ===================== 🔑 Get User Role by Email =====================
+// ✅ Get role of a user by email with fallback
 app.get("/users/role/:email", async (req, res) => {
   const email = req.params.email;
-
   try {
     const user = await usersCollection.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
 
-    res.json({ role: user.role || "user" });
+    // Always respond with a role — default to "user"
+    const role = user?.role || "user";
+
+    res.json({ role });
   } catch (err) {
     console.error("❌ Failed to fetch user role:", err);
     res.status(500).json({ error: "Internal Server Error" });
