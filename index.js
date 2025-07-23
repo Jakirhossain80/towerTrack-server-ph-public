@@ -94,6 +94,61 @@ app.get("/coupons", async (req, res) => {
   }
 });
 
+// ✅ POST: Add a new coupon
+app.post("/coupons", async (req, res) => {
+  try {
+    const newCoupon = req.body;
+    newCoupon.createdAt = new Date();
+
+    const result = await db.collection("coupons").insertOne(newCoupon);
+    res.status(201).json({ insertedId: result.insertedId });
+  } catch (error) {
+    console.error("❌ Failed to add coupon:", error);
+    res.status(500).json({ error: "Failed to add coupon" });
+  }
+});
+
+// ✅ PATCH: Update a coupon by ID
+app.patch("/coupons/:id", async (req, res) => {
+  const { id } = req.params;
+  const updatedFields = req.body;
+
+  try {
+    const result = await db.collection("coupons").updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updatedFields }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Coupon not found" });
+    }
+
+    res.json({ message: "Coupon updated", modifiedCount: result.modifiedCount });
+  } catch (error) {
+    console.error("❌ Failed to update coupon:", error);
+    res.status(500).json({ error: "Failed to update coupon" });
+  }
+});
+
+// ✅ DELETE: Remove a coupon by ID
+app.delete("/coupons/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await db.collection("coupons").deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: "Coupon not found" });
+    }
+
+    res.json({ message: "Coupon deleted", deletedCount: result.deletedCount });
+  } catch (error) {
+    console.error("❌ Failed to delete coupon:", error);
+    res.status(500).json({ error: "Failed to delete coupon" });
+  }
+});
+
+
 // ===================== 🧾 Agreements =====================
 app.post("/agreements", async (req, res) => {
   const { floorNo, blockName, apartmentNo, rent, userEmail, userName } =
