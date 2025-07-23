@@ -80,7 +80,7 @@ app.get("/apartments", async (req, res) => {
 });
 
 // ===================== 🎟️ Public Coupons =====================
-app.get("/public/coupons", async (req, res) => {
+app.get("/coupons", async (req, res) => {
   try {
     const coupons = await db
       .collection("coupons")
