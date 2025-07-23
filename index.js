@@ -148,6 +148,39 @@ app.delete("/coupons/:id", async (req, res) => {
   }
 });
 
+// ✅ POST: Validate coupon code
+app.post("/validate-coupon", async (req, res) => {
+  const { code } = req.body;
+
+  if (!code) {
+    return res.status(400).json({ valid: false, message: "Coupon code is required" });
+  }
+
+  try {
+    const coupon = await db.collection("coupons").findOne({ code: code.toUpperCase().trim() });
+
+    if (!coupon) {
+      return res.status(404).json({ valid: false, message: "Coupon not found" });
+    }
+
+    const now = new Date();
+    const validTill = new Date(coupon.validTill);
+
+    if (validTill < now) {
+      return res.status(400).json({ valid: false, message: "Coupon has expired" });
+    }
+
+    return res.status(200).json({
+      valid: true,
+      discountPercentage: coupon.discount,
+    });
+  } catch (error) {
+    console.error("❌ Coupon validation error:", error);
+    return res.status(500).json({ valid: false, message: "Internal Server Error" });
+  }
+});
+
+
 
 // ===================== 🧾 Agreements =====================
 app.post("/agreements", async (req, res) => {
