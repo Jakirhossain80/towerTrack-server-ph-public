@@ -398,7 +398,7 @@ app.get("/payments/user/:email", async (req, res) => {
   }
 });
 
-// ===================== 🚨 Notices =====================
+// ===================== 🚨 Notices Board =====================
 app.post("/notices/issue", async (req, res) => {
   const { userEmail, apartmentId, reason } = req.body;
 
