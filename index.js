@@ -4,9 +4,13 @@ const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const Stripe = require("stripe");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const cookieParser = require("cookie-parser");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+app.use(cookieParser());
 
 app.use(
   cors({
@@ -25,6 +29,53 @@ const client = new MongoClient(process.env.MONGODB_URI, {
     strict: true,
     deprecationErrors: true,
   },
+});
+
+const generateToken = (userEmail) => {
+  return jwt.sign({ email: userEmail }, process.env.JWT_SECRET, {
+    expiresIn: "7d",
+  });
+};
+
+app.post("/jwt", async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ message: "Email required" });
+  }
+
+  const token = generateToken(email);
+
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  });
+
+  res.json({ message: "JWT issued" });
+});
+
+const verifyJWT = (req, res, next) => {
+  const token = req.cookies.token;
+  if (!token) return res.status(401).json({ message: "Unauthorized" });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.decoded = decoded;
+    next();
+  } catch (err) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+};
+
+app.post("/logout", (req, res) => {
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+  });
+
+  res.status(200).json({ message: "Logged out successfully" });
 });
 
 let db, apartmentsCollection, agreementsCollection, usersCollection;
@@ -114,16 +165,18 @@ app.patch("/coupons/:id", async (req, res) => {
   const updatedFields = req.body;
 
   try {
-    const result = await db.collection("coupons").updateOne(
-      { _id: new ObjectId(id) },
-      { $set: updatedFields }
-    );
+    const result = await db
+      .collection("coupons")
+      .updateOne({ _id: new ObjectId(id) }, { $set: updatedFields });
 
     if (result.matchedCount === 0) {
       return res.status(404).json({ message: "Coupon not found" });
     }
 
-    res.json({ message: "Coupon updated", modifiedCount: result.modifiedCount });
+    res.json({
+      message: "Coupon updated",
+      modifiedCount: result.modifiedCount,
+    });
   } catch (error) {
     console.error("❌ Failed to update coupon:", error);
     res.status(500).json({ error: "Failed to update coupon" });
@@ -135,7 +188,9 @@ app.delete("/coupons/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
-    const result = await db.collection("coupons").deleteOne({ _id: new ObjectId(id) });
+    const result = await db
+      .collection("coupons")
+      .deleteOne({ _id: new ObjectId(id) });
 
     if (result.deletedCount === 0) {
       return res.status(404).json({ message: "Coupon not found" });
@@ -153,21 +208,29 @@ app.post("/validate-coupon", async (req, res) => {
   const { code } = req.body;
 
   if (!code) {
-    return res.status(400).json({ valid: false, message: "Coupon code is required" });
+    return res
+      .status(400)
+      .json({ valid: false, message: "Coupon code is required" });
   }
 
   try {
-    const coupon = await db.collection("coupons").findOne({ code: code.toUpperCase().trim() });
+    const coupon = await db
+      .collection("coupons")
+      .findOne({ code: code.toUpperCase().trim() });
 
     if (!coupon) {
-      return res.status(404).json({ valid: false, message: "Coupon not found" });
+      return res
+        .status(404)
+        .json({ valid: false, message: "Coupon not found" });
     }
 
     const now = new Date();
     const validTill = new Date(coupon.validTill);
 
     if (validTill < now) {
-      return res.status(400).json({ valid: false, message: "Coupon has expired" });
+      return res
+        .status(400)
+        .json({ valid: false, message: "Coupon has expired" });
     }
 
     return res.status(200).json({
@@ -176,11 +239,11 @@ app.post("/validate-coupon", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Coupon validation error:", error);
-    return res.status(500).json({ valid: false, message: "Internal Server Error" });
+    return res
+      .status(500)
+      .json({ valid: false, message: "Internal Server Error" });
   }
 });
-
-
 
 // ===================== 🧾 Agreements =====================
 app.post("/agreements", async (req, res) => {
@@ -257,13 +320,15 @@ app.patch("/agreements/:id/status", async (req, res) => {
       return res.status(404).json({ message: "Agreement not found" });
     }
 
-    res.json({ message: "Agreement status updated", modifiedCount: result.modifiedCount });
+    res.json({
+      message: "Agreement status updated",
+      modifiedCount: result.modifiedCount,
+    });
   } catch (error) {
     console.error("❌ Failed to update agreement:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 });
-
 
 // ===================== 👤 Users =====================
 app.post("/users", async (req, res) => {
@@ -304,10 +369,9 @@ app.get("/users/:email", async (req, res) => {
 app.patch("/users/:email", async (req, res) => {
   const email = req.params.email;
   const updatedRole = req.body.role;
-  const result = await db.collection("users").updateOne(
-    { email },
-    { $set: { role: updatedRole } }
-  );
+  const result = await db
+    .collection("users")
+    .updateOne({ email }, { $set: { role: updatedRole } });
   res.send(result);
 });
 
@@ -328,9 +392,8 @@ app.get("/users/role/:email", async (req, res) => {
   }
 });
 
-
 // ===================== 📣 Announcements =====================
-app.post("/announcements", async (req, res) => {
+app.post("/announcements", verifyJWT, async (req, res) => {
   const { title, description } = req.body;
   if (!title || !description)
     return res.status(400).json({ message: "Title and description required" });
@@ -344,7 +407,7 @@ app.post("/announcements", async (req, res) => {
   res.status(201).json({ insertedId: result.insertedId });
 });
 
-app.get("/announcements", async (req, res) => {
+app.get("/announcements", verifyJWT, async (req, res) => {
   try {
     const data = await db
       .collection("announcements")
@@ -420,10 +483,9 @@ app.post("/notices/issue", async (req, res) => {
 
   if (notice.noticeCount >= 3) {
     await db.collection("agreements").deleteOne({ userEmail });
-    await db.collection("users").updateOne(
-      { email: userEmail },
-      { $set: { role: "user" } }
-    );
+    await db
+      .collection("users")
+      .updateOne({ email: userEmail }, { $set: { role: "user" } });
   }
 
   res.status(201).send({ message: "Notice issued", notice });
