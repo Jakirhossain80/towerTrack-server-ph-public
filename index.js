@@ -39,21 +39,23 @@ const generateToken = (userEmail) => {
 
 app.post("/jwt", async (req, res) => {
   const { email } = req.body;
+
   if (!email) {
     return res.status(400).json({ message: "Email required" });
   }
 
-  const token = generateToken(email);
+  const token = generateToken(email); // uses your declared helper
 
   res.cookie("token", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production", // ✅ secure in prod
     sameSite: "strict",
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   });
 
   res.json({ message: "JWT issued" });
 });
+
 
 const verifyJWT = (req, res, next) => {
   const token = req.cookies.token;
@@ -160,7 +162,7 @@ app.post("/coupons", verifyJWT, async (req, res) => {
 });
 
 // ✅ PATCH: Update a coupon by ID
-app.patch("/coupons/:id",verifyJWT, async (req, res) => {
+app.patch("/coupons/:id", verifyJWT, async (req, res) => {
   const { id } = req.params;
   const updatedFields = req.body;
 
@@ -246,7 +248,7 @@ app.post("/validate-coupon", async (req, res) => {
 });
 
 // ===================== 🧾 Agreements =====================
-app.post("/agreements", async (req, res) => {
+app.post("/agreements", verifyJWT, async (req, res) => {
   const { floorNo, blockName, apartmentNo, rent, userEmail, userName } =
     req.body;
 
@@ -275,7 +277,7 @@ app.post("/agreements", async (req, res) => {
   }
 });
 
-app.get("/agreements", async (req, res) => {
+app.get("/agreements", verifyJWT, async (req, res) => {
   try {
     const status = req.query.status;
     const query = status ? { status } : {};
@@ -289,7 +291,7 @@ app.get("/agreements", async (req, res) => {
   }
 });
 
-app.get("/agreements/member/:email", async (req, res) => {
+app.get("/agreements/member/:email", verifyJWT, async (req, res) => {
   try {
     const agreement = await agreementsCollection.findOne({
       userEmail: { $regex: new RegExp(`^${req.params.email}$`, "i") },
@@ -302,7 +304,7 @@ app.get("/agreements/member/:email", async (req, res) => {
 });
 
 // ✅ PATCH: Update agreement status by ID
-app.patch("/agreements/:id/status", async (req, res) => {
+app.patch("/agreements/:id/status", verifyJWT, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
@@ -421,7 +423,7 @@ app.get("/announcements", verifyJWT, async (req, res) => {
 });
 
 // ===================== 💳 Payments =====================
-app.post("/create-payment-intent", async (req, res) => {
+app.post("/create-payment-intent", verifyJWT, async (req, res) => {
   try {
     const { amount } = req.body;
     const paymentIntent = await stripe.paymentIntents.create({
@@ -435,7 +437,7 @@ app.post("/create-payment-intent", async (req, res) => {
   }
 });
 
-app.post("/payments", async (req, res) => {
+app.post("/payments", verifyJWT, async (req, res) => {
   try {
     const payment = req.body;
     const result = await db.collection("payments").insertOne(payment);
@@ -491,7 +493,7 @@ app.post("/notices/issue", async (req, res) => {
   res.status(201).send({ message: "Notice issued", notice });
 });
 
-app.get("/notices/user/:email", async (req, res) => {
+app.get("/notices/users/:email", async (req, res) => {
   const notices = await db
     .collection("notices")
     .find({ userEmail: req.params.email })
