@@ -357,7 +357,7 @@ app.get("/users", verifyJWT, async (req, res) => {
   }
 });
 
-app.get("/users/:email", async (req, res) => {
+app.get("/users/:email", verifyJWT, async (req, res) => {
   try {
     const user = await usersCollection.findOne({ email: req.params.email });
     res.send({ exists: !!user });
