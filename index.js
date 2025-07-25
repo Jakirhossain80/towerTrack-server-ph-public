@@ -377,7 +377,7 @@ app.patch("/users/:email", async (req, res) => {
 
 // ===================== 🔑 Get User Role by Email =====================
 // ✅ Get role of a user by email with fallback
-app.get("/users/role/:email", async (req, res) => {
+app.get("/users/role/:email", verifyJWT, async (req, res) => {
   const email = req.params.email;
   try {
     const user = await usersCollection.findOne({ email });
