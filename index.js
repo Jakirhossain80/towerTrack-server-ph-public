@@ -146,7 +146,7 @@ app.get("/coupons", async (req, res) => {
 });
 
 // ✅ POST: Add a new coupon
-app.post("/coupons", async (req, res) => {
+app.post("/coupons", verifyJWT, async (req, res) => {
   try {
     const newCoupon = req.body;
     newCoupon.createdAt = new Date();
@@ -160,7 +160,7 @@ app.post("/coupons", async (req, res) => {
 });
 
 // ✅ PATCH: Update a coupon by ID
-app.patch("/coupons/:id", async (req, res) => {
+app.patch("/coupons/:id",verifyJWT, async (req, res) => {
   const { id } = req.params;
   const updatedFields = req.body;
 
@@ -184,7 +184,7 @@ app.patch("/coupons/:id", async (req, res) => {
 });
 
 // ✅ DELETE: Remove a coupon by ID
-app.delete("/coupons/:id", async (req, res) => {
+app.delete("/coupons/:id",verifyJWT, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -348,7 +348,7 @@ app.post("/users", async (req, res) => {
   res.status(201).json({ insertedId: result.insertedId });
 });
 
-app.get("/users", async (req, res) => {
+app.get("/users", verifyJWT, async (req, res) => {
   try {
     const users = await usersCollection.find().toArray();
     res.send(users);
@@ -366,7 +366,7 @@ app.get("/users/:email", async (req, res) => {
   }
 });
 
-app.patch("/users/:email", async (req, res) => {
+app.patch("/users/:email", verifyJWT, async (req, res) => {
   const email = req.params.email;
   const updatedRole = req.body.role;
   const result = await db
@@ -445,7 +445,7 @@ app.post("/payments", async (req, res) => {
   }
 });
 
-app.get("/payments/user/:email", async (req, res) => {
+app.get("/payments/user/:email",  verifyJWT, async (req, res) => {
   const email = req.params.email;
 
   try {
