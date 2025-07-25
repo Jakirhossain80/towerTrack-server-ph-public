@@ -494,7 +494,7 @@ app.post("/notices/issue", async (req, res) => {
   res.status(201).send({ message: "Notice issued", notice });
 });
 
-app.get("/notices/users/:email", async (req, res) => {
+app.get("/notices/users/:email", verifyJWT, async (req, res) => {
   const notices = await db
     .collection("notices")
     .find({ userEmail: req.params.email })
