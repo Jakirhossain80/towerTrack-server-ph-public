@@ -45,7 +45,7 @@ app.post("/jwt", async (req, res) => {
     return res.status(400).json({ message: "Email required" });
   }
 
-  const token = generateToken(email); // uses your declared helper
+  const token = generateToken(email); // uses your declared helper ok
 
   res.cookie("token", token, {
     httpOnly: true,
