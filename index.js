@@ -17,7 +17,7 @@ app.use(
     origin: [
       "https://towertrack-ph-assestwelve.netlify.app",
       //"http://localhost:5173",
-      
+
     ],
     credentials: true,
   })
@@ -50,7 +50,7 @@ app.post("/jwt", async (req, res) => {
   res.cookie("token", token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production", // ✅ secure in prod
-     sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   });
 
@@ -70,6 +70,66 @@ const verifyJWT = (req, res, next) => {
     return res.status(403).json({ message: "Forbidden" });
   }
 };
+
+
+// ✅ Role-based middleware verifyAdmin
+const verifyAdmin = async (req, res, next) => {
+  const email = req.decoded?.email;
+  if (!email) return res.status(403).json({ message: "Forbidden: No user found" });
+
+  const user = await usersCollection.findOne({ email });
+  if (user?.role !== "admin") {
+    return res.status(403).json({ message: "Forbidden: Admins only" });
+  }
+
+  next();
+};
+
+// ✅ Role-based middleware verifyMember
+const verifyMember = async (req, res, next) => {
+  const email = req.decoded?.email;
+  if (!email) return res.status(403).json({ message: "Forbidden: No user found" });
+
+  const user = await usersCollection.findOne({ email });
+  if (user?.role !== "member") {
+    return res.status(403).json({ message: "Forbidden: Members only" });
+  }
+
+  next();
+};
+
+// ✅ Role-based middleware verifyUser
+const verifyUser = async (req, res, next) => {
+  const email = req.decoded?.email;
+  if (!email) {
+    return res.status(403).json({ message: "Forbidden: No user found" });
+  }
+
+  const user = await usersCollection.findOne({ email });
+  if (user?.role !== "user") {
+    return res.status(403).json({ message: "Forbidden: Users only" });
+  }
+
+  next();
+};
+
+
+// ✅ Role-based middleware verifyMemberOrUser
+const verifyMemberOrUser = async (req, res, next) => {
+  const email = req.decoded?.email;
+  if (!email) return res.status(403).json({ message: "Forbidden: No user found" });
+
+  const user = await usersCollection.findOne({ email });
+  if (!user) return res.status(404).json({ message: "User not found" });
+
+  if (user.role === "member" || user.role === "user") {
+    return next();
+  }
+
+  return res.status(403).json({ message: "Forbidden: Members or Users only" });
+};
+
+
 
 app.post("/logout", (req, res) => {
   res.clearCookie("token", {
@@ -149,7 +209,7 @@ app.get("/coupons", async (req, res) => {
 });
 
 // ✅ POST: Add a new coupon
-app.post("/coupons", verifyJWT, async (req, res) => {
+app.post("/coupons", verifyJWT, verifyAdmin, async (req, res) => {
   try {
     const newCoupon = req.body;
     newCoupon.createdAt = new Date();
@@ -163,7 +223,7 @@ app.post("/coupons", verifyJWT, async (req, res) => {
 });
 
 // ✅ PATCH: Update a coupon by ID
-app.patch("/coupons/:id", verifyJWT, async (req, res) => {
+app.patch("/coupons/:id", verifyJWT, verifyAdmin, async (req, res) => {
   const { id } = req.params;
   const updatedFields = req.body;
 
@@ -187,7 +247,7 @@ app.patch("/coupons/:id", verifyJWT, async (req, res) => {
 });
 
 // ✅ DELETE: Remove a coupon by ID
-app.delete("/coupons/:id",verifyJWT, async (req, res) => {
+app.delete("/coupons/:id", verifyJWT, verifyAdmin, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -249,7 +309,7 @@ app.post("/validate-coupon", async (req, res) => {
 });
 
 // ===================== 🧾 Agreements =====================
-app.post("/agreements", verifyJWT, async (req, res) => {
+app.post("/agreements", verifyJWT, verifyUser, async (req, res) => {
   const { floorNo, blockName, apartmentNo, rent, userEmail, userName } =
     req.body;
 
@@ -278,7 +338,7 @@ app.post("/agreements", verifyJWT, async (req, res) => {
   }
 });
 
-app.get("/agreements", verifyJWT, async (req, res) => {
+app.get("/agreements", verifyJWT, verifyAdmin, async (req, res) => {
   try {
     const status = req.query.status;
     const query = status ? { status } : {};
@@ -292,7 +352,7 @@ app.get("/agreements", verifyJWT, async (req, res) => {
   }
 });
 
-app.get("/agreements/member/:email", verifyJWT, async (req, res) => {
+app.get("/agreements/member/:email", verifyJWT, verifyMember, async (req, res) => {
   try {
     const agreement = await agreementsCollection.findOne({
       userEmail: { $regex: new RegExp(`^${req.params.email}$`, "i") },
@@ -305,7 +365,7 @@ app.get("/agreements/member/:email", verifyJWT, async (req, res) => {
 });
 
 // ✅ PATCH: Update agreement status by ID
-app.patch("/agreements/:id/status", verifyJWT, async (req, res) => {
+app.patch("/agreements/:id/status", verifyJWT, verifyAdmin, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
@@ -351,7 +411,7 @@ app.post("/users", async (req, res) => {
   res.status(201).json({ insertedId: result.insertedId });
 });
 
-app.get("/users", verifyJWT, async (req, res) => {
+app.get("/users", verifyJWT, verifyAdmin, async (req, res) => {
   try {
     const users = await usersCollection.find().toArray();
     res.send(users);
@@ -360,7 +420,7 @@ app.get("/users", verifyJWT, async (req, res) => {
   }
 });
 
-app.get("/users/:email", verifyJWT, async (req, res) => {
+app.get("/users/:email", verifyJWT, verifyAdmin, async (req, res) => {
   try {
     const user = await usersCollection.findOne({ email: req.params.email });
     res.send({ exists: !!user });
@@ -369,7 +429,7 @@ app.get("/users/:email", verifyJWT, async (req, res) => {
   }
 });
 
-app.patch("/users/:email", verifyJWT, async (req, res) => {
+app.patch("/users/:email", verifyJWT, verifyAdmin, async (req, res) => {
   const email = req.params.email;
   const updatedRole = req.body.role;
   const result = await db
@@ -380,7 +440,7 @@ app.patch("/users/:email", verifyJWT, async (req, res) => {
 
 // ===================== 🔑 Get User Role by Email =====================
 // ✅ Get role of a user by email with fallback
-app.get("/users/role/:email", verifyJWT, async (req, res) => {
+app.get("/users/role/:email", verifyJWT, verifyAdmin, async (req, res) => {
   const email = req.params.email;
   try {
     const user = await usersCollection.findOne({ email });
@@ -396,7 +456,7 @@ app.get("/users/role/:email", verifyJWT, async (req, res) => {
 });
 
 // ===================== 📣 Announcements =====================
-app.post("/announcements", verifyJWT, async (req, res) => {
+app.post("/announcements", verifyJWT, verifyAdmin, async (req, res) => {
   const { title, description } = req.body;
   if (!title || !description)
     return res.status(400).json({ message: "Title and description required" });
@@ -410,7 +470,7 @@ app.post("/announcements", verifyJWT, async (req, res) => {
   res.status(201).json({ insertedId: result.insertedId });
 });
 
-app.get("/announcements", verifyJWT, async (req, res) => {
+app.get("/announcements", verifyJWT, verifyMemberOrUser, async (req, res) => {
   try {
     const data = await db
       .collection("announcements")
@@ -424,7 +484,7 @@ app.get("/announcements", verifyJWT, async (req, res) => {
 });
 
 // ===================== 💳 Payments =====================
-app.post("/create-payment-intent", verifyJWT, async (req, res) => {
+app.post("/create-payment-intent", verifyJWT, verifyMember, async (req, res) => {
   try {
     const { amount } = req.body;
     const paymentIntent = await stripe.paymentIntents.create({
@@ -438,7 +498,7 @@ app.post("/create-payment-intent", verifyJWT, async (req, res) => {
   }
 });
 
-app.post("/payments", verifyJWT, async (req, res) => {
+app.post("/payments", verifyJWT, verifyMember, async (req, res) => {
   try {
     const payment = req.body;
     const result = await db.collection("payments").insertOne(payment);
@@ -448,7 +508,7 @@ app.post("/payments", verifyJWT, async (req, res) => {
   }
 });
 
-app.get("/payments/user/:email",  verifyJWT, async (req, res) => {
+app.get("/payments/user/:email", verifyJWT, verifyMember, async (req, res) => {
   const email = req.params.email;
 
   try {
@@ -494,7 +554,7 @@ app.post("/notices/issue", async (req, res) => {
   res.status(201).send({ message: "Notice issued", notice });
 });
 
-app.get("/notices/users/:email", verifyJWT, async (req, res) => {
+app.get("/notices/users/:email", verifyJWT, verifyMember, async (req, res) => {
   const notices = await db
     .collection("notices")
     .find({ userEmail: req.params.email })
