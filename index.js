@@ -131,6 +131,30 @@ const verifyMemberOrUser = async (req, res, next) => {
 
 
 
+// ✅ Role-based middleware verifyAllRoles
+const verifyAllRoles = async (req, res, next) => {
+  const email = req.decoded?.email;
+  if (!email) {
+    return res.status(403).json({ message: "Forbidden: No user found" });
+  }
+
+  const user = await usersCollection.findOne({ email });
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  const allowedRoles = ["admin", "member", "user"];
+
+  if (allowedRoles.includes(user.role)) {
+    return next();
+  }
+
+  return res.status(403).json({ message: "Forbidden: Unauthorized role" });
+};
+
+
+
+
 app.post("/logout", (req, res) => {
   res.clearCookie("token", {
     httpOnly: true,
@@ -411,7 +435,7 @@ app.post("/users", async (req, res) => {
   res.status(201).json({ insertedId: result.insertedId });
 });
 
-app.get("/users", verifyJWT, verifyAdmin, async (req, res) => {
+app.get("/users", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     const users = await usersCollection.find().toArray();
     res.send(users);
@@ -420,7 +444,7 @@ app.get("/users", verifyJWT, verifyAdmin, async (req, res) => {
   }
 });
 
-app.get("/users/:email", verifyJWT, verifyAdmin, async (req, res) => {
+app.get("/users/:email", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     const user = await usersCollection.findOne({ email: req.params.email });
     res.send({ exists: !!user });
@@ -440,7 +464,7 @@ app.patch("/users/:email", verifyJWT, verifyAdmin, async (req, res) => {
 
 // ===================== 🔑 Get User Role by Email =====================
 // ✅ Get role of a user by email with fallback
-app.get("/users/role/:email", verifyJWT, verifyAdmin, async (req, res) => {
+app.get("/users/role/:email", verifyJWT, verifyAllRoles, async (req, res) => {
   const email = req.params.email;
   try {
     const user = await usersCollection.findOne({ email });
