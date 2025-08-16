@@ -588,6 +588,20 @@ app.get("/notices/users/:email", verifyJWT, verifyMember, async (req, res) => {
   res.send(notices);
 });
 
+
+// ===================== Buildings =====================
+
+app.get("/buildings", async (req, res) => {
+  try {
+    const items = await db.collection("buildings").find().sort({ createdAt: -1 }).toArray();
+    res.status(200).json(items);
+  } catch (err) {
+    console.error("❌ Failed to fetch buildings:", err);
+    res.status(500).json({ error: "Failed to fetch buildings" });
+  }
+});
+
+
 app.get("/", (req, res) => {
   res.send("Hello TowerTrack World!");
 });
