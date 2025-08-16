@@ -16,7 +16,7 @@ app.use(
   cors({
     origin: [
       "https://towertrack-ph-assestwelve.netlify.app",
-      //"http://localhost:5173",
+      "http://localhost:5173",
 
     ],
     credentials: true,
@@ -168,6 +168,7 @@ app.post("/logout", (req, res) => {
 let db, apartmentsCollection, agreementsCollection, usersCollection;
 
 async function connectDB() {
+  await client.connect();
   db = client.db("towerTrackDB");
   apartmentsCollection = db.collection("apartments");
   agreementsCollection = db.collection("agreements");
