@@ -3,28 +3,53 @@ const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const Stripe = require("stripe");
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const cookieParser = require("cookie-parser");
 const jwt = require("jsonwebtoken");
 
 const app = express();
-const port = process.env.PORT || 3000;
 
+/* ----------------------------- Basic Config ----------------------------- */
+const {
+  PORT = 3000,
+  NODE_ENV = "development",
+  MONGODB_URI,
+  STRIPE_SECRET_KEY,
+  JWT_SECRET,
+} = process.env;
+
+if (!MONGODB_URI) throw new Error("❌ MONGODB_URI missing in environment");
+if (!STRIPE_SECRET_KEY) throw new Error("❌ STRIPE_SECRET_KEY missing in environment");
+if (!JWT_SECRET) throw new Error("❌ JWT_SECRET missing in environment");
+
+const stripe = Stripe(STRIPE_SECRET_KEY);
+const isProd = NODE_ENV === "production";
+
+/* ------------------------------ Middleware ------------------------------ */
+app.set("trust proxy", 1); // play nice behind proxies (Vercel/Render/NGINX)
 app.use(cookieParser());
+
+// tighten JSON body limits a bit (safe default)
+app.use(express.json({ limit: "200kb" }));
+
+// centralize CORS origins (add more via env if you need)
+const ALLOWED_ORIGINS = [
+  "https://towertrack-ph-assestwelve.netlify.app",
+  "http://localhost:5173",
+];
 
 app.use(
   cors({
-    origin: [
-      "https://towertrack-ph-assestwelve.netlify.app",
-      "http://localhost:5173",
-
-    ],
+    origin: (origin, cb) => {
+      // allow mobile apps / curl (no origin) & allowed origins
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      return cb(new Error("Not allowed by CORS"), false);
+    },
     credentials: true,
   })
 );
-app.use(express.json());
 
-const client = new MongoClient(process.env.MONGODB_URI, {
+/* ------------------------------ DB Client ------------------------------- */
+const client = new MongoClient(MONGODB_URI, {
   serverApi: {
     version: ServerApiVersion.v1,
     strict: true,
@@ -32,147 +57,99 @@ const client = new MongoClient(process.env.MONGODB_URI, {
   },
 });
 
-const generateToken = (userEmail) => {
-  return jwt.sign({ email: userEmail }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
+let db, apartmentsCollection, agreementsCollection, usersCollection;
+
+/* ------------------------- Small Utils / Helpers ------------------------ */
+const cookieOptions = {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: isProd ? "none" : "lax",
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 
-app.post("/jwt", async (req, res) => {
-  const { email } = req.body;
+const sendError = (res, code, message, extra = {}) =>
+  res.status(code).json({ error: message, ...extra });
 
-  if (!email) {
-    return res.status(400).json({ message: "Email required" });
+const generateToken = (email) =>
+  jwt.sign({ email }, JWT_SECRET, { expiresIn: "7d" });
+
+const isValidObjectId = (id) => {
+  try {
+    return !!new ObjectId(id);
+  } catch {
+    return false;
   }
+};
 
-  const token = generateToken(email); // uses your declared helper
-
-  res.cookie("token", token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production", // ✅ secure in prod
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  });
-
-  res.json({ message: "JWT issued" });
-});
-
-
+/* ----------------------------- Auth Middlewares ----------------------------- */
 const verifyJWT = (req, res, next) => {
-  const token = req.cookies.token;
-  if (!token) return res.status(401).json({ message: "Unauthorized" });
+  const token = req.cookies?.token;
+  if (!token) return sendError(res, 401, "Unauthorized");
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.decoded = decoded;
     next();
-  } catch (err) {
-    return res.status(403).json({ message: "Forbidden" });
+  } catch {
+    return sendError(res, 403, "Forbidden");
   }
 };
 
-
-// ✅ Role-based middleware verifyAdmin
-const verifyAdmin = async (req, res, next) => {
+const verifyRole = (roles) => async (req, res, next) => {
   const email = req.decoded?.email;
-  if (!email) return res.status(403).json({ message: "Forbidden: No user found" });
+  if (!email) return sendError(res, 403, "Forbidden: No user found");
 
   const user = await usersCollection.findOne({ email });
-  if (user?.role !== "admin") {
-    return res.status(403).json({ message: "Forbidden: Admins only" });
-  }
+  if (!user) return sendError(res, 404, "User not found");
 
-  next();
+  if (roles.includes(user.role)) return next();
+  return sendError(res, 403, `Forbidden: ${roles.join(" or ")} only`);
 };
 
-// ✅ Role-based middleware verifyMember
-const verifyMember = async (req, res, next) => {
-  const email = req.decoded?.email;
-  if (!email) return res.status(403).json({ message: "Forbidden: No user found" });
+// role helpers preserving original behavior
+const verifyAdmin = verifyRole(["admin"]);
+const verifyMember = verifyRole(["member"]);
+const verifyUser = verifyRole(["user"]);
+const verifyMemberOrUser = verifyRole(["member", "user"]);
+const verifyAllRoles = verifyRole(["admin", "member", "user"]);
 
-  const user = await usersCollection.findOne({ email });
-  if (user?.role !== "member") {
-    return res.status(403).json({ message: "Forbidden: Members only" });
-  }
+/* --------------------------------- Auth --------------------------------- */
+app.post("/jwt", async (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return sendError(res, 400, "Email required");
 
-  next();
-};
-
-// ✅ Role-based middleware verifyUser
-const verifyUser = async (req, res, next) => {
-  const email = req.decoded?.email;
-  if (!email) {
-    return res.status(403).json({ message: "Forbidden: No user found" });
-  }
-
-  const user = await usersCollection.findOne({ email });
-  if (user?.role !== "user") {
-    return res.status(403).json({ message: "Forbidden: Users only" });
-  }
-
-  next();
-};
-
-
-// ✅ Role-based middleware verifyMemberOrUser
-const verifyMemberOrUser = async (req, res, next) => {
-  const email = req.decoded?.email;
-  if (!email) return res.status(403).json({ message: "Forbidden: No user found" });
-
-  const user = await usersCollection.findOne({ email });
-  if (!user) return res.status(404).json({ message: "User not found" });
-
-  if (user.role === "member" || user.role === "user") {
-    return next();
-  }
-
-  return res.status(403).json({ message: "Forbidden: Members or Users only" });
-};
-
-
-
-// ✅ Role-based middleware verifyAllRoles
-const verifyAllRoles = async (req, res, next) => {
-  const email = req.decoded?.email;
-  if (!email) {
-    return res.status(403).json({ message: "Forbidden: No user found" });
-  }
-
-  const user = await usersCollection.findOne({ email });
-  if (!user) {
-    return res.status(404).json({ message: "User not found" });
-  }
-
-  const allowedRoles = ["admin", "member", "user"];
-
-  if (allowedRoles.includes(user.role)) {
-    return next();
-  }
-
-  return res.status(403).json({ message: "Forbidden: Unauthorized role" });
-};
-
-
-
+  const token = generateToken(email);
+  res.cookie("token", token, cookieOptions);
+  res.json({ message: "JWT issued" });
+});
 
 app.post("/logout", (req, res) => {
   res.clearCookie("token", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
   });
-
   res.status(200).json({ message: "Logged out successfully" });
 });
 
-let db, apartmentsCollection, agreementsCollection, usersCollection;
-
+/* ------------------------------ DB Connect ------------------------------ */
 async function connectDB() {
   await client.connect();
   db = client.db("towerTrackDB");
   apartmentsCollection = db.collection("apartments");
   agreementsCollection = db.collection("agreements");
   usersCollection = db.collection("users");
+
+  // helpful indexes (won't break if exist)
+  await Promise.allSettled([
+    agreementsCollection.createIndex({ userEmail: 1 }, { unique: true }),
+    usersCollection.createIndex({ email: 1 }, { unique: true }),
+    db.collection("coupons").createIndex({ code: 1 }, { unique: true }),
+    db.collection("payments").createIndex({ email: 1, createdAt: -1 }),
+    db.collection("announcements").createIndex({ createdAt: -1 }),
+    db.collection("buildings").createIndex({ createdAt: -1 }),
+  ]);
+
   await cleanDuplicateAgreements();
   await db.command({ ping: 1 });
   console.log("✅ MongoDB Connected");
@@ -181,144 +158,112 @@ async function connectDB() {
 async function cleanDuplicateAgreements() {
   const duplicates = await agreementsCollection
     .aggregate([
-      {
-        $group: {
-          _id: "$userEmail",
-          count: { $sum: 1 },
-          docs: { $push: "$_id" },
-        },
-      },
+      { $group: { _id: "$userEmail", count: { $sum: 1 }, docs: { $push: "$_id" } } },
       { $match: { count: { $gt: 1 } } },
     ])
     .toArray();
 
   for (const dup of duplicates) {
     const idsToDelete = dup.docs.slice(1);
-    await agreementsCollection.deleteMany({ _id: { $in: idsToDelete } });
-    console.log(`🧹 Removed ${idsToDelete.length} duplicates for ${dup._id}`);
-  }
-
-  try {
-    await agreementsCollection.createIndex({ userEmail: 1 }, { unique: true });
-    console.log("✅ Unique index on userEmail created");
-  } catch (err) {
-    console.error("❌ Index creation error:", err);
+    if (idsToDelete.length) {
+      await agreementsCollection.deleteMany({ _id: { $in: idsToDelete } });
+      console.log(`🧹 Removed ${idsToDelete.length} duplicate agreements for ${dup._id}`);
+    }
   }
 }
+connectDB().catch((e) => {
+  console.error("❌ DB connection failed:", e);
+  process.exit(1);
+});
 
-connectDB();
+// graceful shutdown
+process.on("SIGINT", async () => {
+  try {
+    await client.close();
+    console.log("🔌 MongoDB connection closed");
+    process.exit(0);
+  } catch {
+    process.exit(1);
+  }
+});
 
-// ===================== 🏢 Apartments =====================
+/* -------------------------------- Routes -------------------------------- */
+// 🏢 Apartments (public)
 app.get("/apartments", async (req, res) => {
   try {
     const apartments = await apartmentsCollection.find().toArray();
     res.send(apartments);
   } catch (err) {
-    res.status(500).send({ message: "Failed to fetch apartments" });
+    console.error(err);
+    sendError(res, 500, "Failed to fetch apartments");
   }
 });
 
-// ===================== 🎟️ Public Coupons =====================
+// 🎟️ Coupons
 app.get("/coupons", async (req, res) => {
   try {
-    const coupons = await db
-      .collection("coupons")
-      .find()
-      .sort({ validTill: 1 })
-      .toArray();
+    const coupons = await db.collection("coupons").find().sort({ validTill: 1 }).toArray();
     res.send(coupons);
   } catch (err) {
     console.error("❌ Failed to fetch coupons:", err);
-    res.status(500).json({ error: "Failed to fetch coupons" });
+    sendError(res, 500, "Failed to fetch coupons");
   }
 });
 
-// ✅ POST: Add a new coupon
 app.post("/coupons", verifyJWT, verifyAdmin, async (req, res) => {
   try {
-    const newCoupon = req.body;
-    newCoupon.createdAt = new Date();
-
+    const newCoupon = { ...req.body, createdAt: new Date() };
     const result = await db.collection("coupons").insertOne(newCoupon);
     res.status(201).json({ insertedId: result.insertedId });
   } catch (error) {
     console.error("❌ Failed to add coupon:", error);
-    res.status(500).json({ error: "Failed to add coupon" });
+    sendError(res, 500, "Failed to add coupon");
   }
 });
 
-// ✅ PATCH: Update a coupon by ID
 app.patch("/coupons/:id", verifyJWT, verifyAdmin, async (req, res) => {
   const { id } = req.params;
-  const updatedFields = req.body;
+  if (!isValidObjectId(id)) return sendError(res, 400, "Invalid coupon id");
 
   try {
     const result = await db
       .collection("coupons")
-      .updateOne({ _id: new ObjectId(id) }, { $set: updatedFields });
+      .updateOne({ _id: new ObjectId(id) }, { $set: req.body });
 
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ message: "Coupon not found" });
-    }
-
-    res.json({
-      message: "Coupon updated",
-      modifiedCount: result.modifiedCount,
-    });
+    if (!result.matchedCount) return sendError(res, 404, "Coupon not found");
+    res.json({ message: "Coupon updated", modifiedCount: result.modifiedCount });
   } catch (error) {
     console.error("❌ Failed to update coupon:", error);
-    res.status(500).json({ error: "Failed to update coupon" });
+    sendError(res, 500, "Failed to update coupon");
   }
 });
 
-// ✅ DELETE: Remove a coupon by ID
 app.delete("/coupons/:id", verifyJWT, verifyAdmin, async (req, res) => {
   const { id } = req.params;
+  if (!isValidObjectId(id)) return sendError(res, 400, "Invalid coupon id");
 
   try {
-    const result = await db
-      .collection("coupons")
-      .deleteOne({ _id: new ObjectId(id) });
-
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ message: "Coupon not found" });
-    }
-
+    const result = await db.collection("coupons").deleteOne({ _id: new ObjectId(id) });
+    if (!result.deletedCount) return sendError(res, 404, "Coupon not found");
     res.json({ message: "Coupon deleted", deletedCount: result.deletedCount });
   } catch (error) {
     console.error("❌ Failed to delete coupon:", error);
-    res.status(500).json({ error: "Failed to delete coupon" });
+    sendError(res, 500, "Failed to delete coupon");
   }
 });
 
-// ✅ POST: Validate coupon code
 app.post("/validate-coupon", async (req, res) => {
-  const { code } = req.body;
-
-  if (!code) {
-    return res
-      .status(400)
-      .json({ valid: false, message: "Coupon code is required" });
-  }
+  const { code } = req.body || {};
+  if (!code) return res.status(400).json({ valid: false, message: "Coupon code is required" });
 
   try {
-    const coupon = await db
-      .collection("coupons")
-      .findOne({ code: code.toUpperCase().trim() });
-
-    if (!coupon) {
-      return res
-        .status(404)
-        .json({ valid: false, message: "Coupon not found" });
-    }
+    const coupon = await db.collection("coupons").findOne({ code: String(code).toUpperCase().trim() });
+    if (!coupon) return res.status(404).json({ valid: false, message: "Coupon not found" });
 
     const now = new Date();
-    const validTill = new Date(coupon.validTill);
-
-    if (validTill < now) {
-      return res
-        .status(400)
-        .json({ valid: false, message: "Coupon has expired" });
+    const validTill = coupon.validTill ? new Date(coupon.validTill) : null;
+    if (validTill && validTill < now) {
+      return res.status(400).json({ valid: false, message: "Coupon has expired" });
     }
 
     return res.status(200).json({
@@ -327,22 +272,17 @@ app.post("/validate-coupon", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Coupon validation error:", error);
-    return res
-      .status(500)
-      .json({ valid: false, message: "Internal Server Error" });
+    return res.status(500).json({ valid: false, message: "Internal Server Error" });
   }
 });
 
-// ===================== 🧾 Agreements =====================
+// 🧾 Agreements
 app.post("/agreements", verifyJWT, verifyUser, async (req, res) => {
-  const { floorNo, blockName, apartmentNo, rent, userEmail, userName } =
-    req.body;
-
-  if (!userEmail || !userName)
-    return res.status(400).json({ error: "Missing user info" });
+  const { floorNo, blockName, apartmentNo, rent, userEmail, userName } = req.body || {};
+  if (!userEmail || !userName) return sendError(res, 400, "Missing user info");
 
   const existing = await agreementsCollection.findOne({ userEmail });
-  if (existing) return res.status(409).json({ message: "Already applied" });
+  if (existing) return sendError(res, 409, "Already applied");
 
   const agreement = {
     userName,
@@ -359,21 +299,20 @@ app.post("/agreements", verifyJWT, verifyUser, async (req, res) => {
     const result = await agreementsCollection.insertOne(agreement);
     res.status(201).json({ insertedId: result.insertedId });
   } catch (err) {
-    res.status(500).json({ error: "Agreement creation failed" });
+    console.error(err);
+    sendError(res, 500, "Agreement creation failed");
   }
 });
 
 app.get("/agreements", verifyJWT, verifyAdmin, async (req, res) => {
   try {
-    const status = req.query.status;
+    const status = req.query?.status;
     const query = status ? { status } : {};
-    const data = await agreementsCollection
-      .find(query)
-      .sort({ createdAt: -1 })
-      .toArray();
+    const data = await agreementsCollection.find(query).sort({ createdAt: -1 }).toArray();
     res.send(data);
   } catch (err) {
-    res.status(500).json({ message: "Failed to fetch agreements" });
+    console.error(err);
+    sendError(res, 500, "Failed to fetch agreements");
   }
 });
 
@@ -385,47 +324,37 @@ app.get("/agreements/member/:email", verifyJWT, verifyMember, async (req, res) =
     });
     res.send(agreement || null);
   } catch (err) {
-    res.status(500).send({ message: "Failed to fetch agreement" });
+    console.error(err);
+    sendError(res, 500, "Failed to fetch agreement");
   }
 });
 
-// ✅ PATCH: Update agreement status by ID
 app.patch("/agreements/:id/status", verifyJWT, verifyAdmin, async (req, res) => {
   const { id } = req.params;
-  const { status } = req.body;
-
-  if (!status) {
-    return res.status(400).json({ message: "Status is required" });
-  }
+  const { status } = req.body || {};
+  if (!status) return sendError(res, 400, "Status is required");
+  if (!isValidObjectId(id)) return sendError(res, 400, "Invalid agreement id");
 
   try {
     const result = await agreementsCollection.updateOne(
       { _id: new ObjectId(id) },
       { $set: { status } }
     );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ message: "Agreement not found" });
-    }
-
-    res.json({
-      message: "Agreement status updated",
-      modifiedCount: result.modifiedCount,
-    });
+    if (!result.matchedCount) return sendError(res, 404, "Agreement not found");
+    res.json({ message: "Agreement status updated", modifiedCount: result.modifiedCount });
   } catch (error) {
     console.error("❌ Failed to update agreement:", error);
-    res.status(500).json({ message: "Internal Server Error" });
+    sendError(res, 500, "Internal Server Error");
   }
 });
 
-// ===================== 👤 Users =====================
+// 👤 Users
 app.post("/users", async (req, res) => {
-  const { email, name, role } = req.body;
-  if (!email || !name)
-    return res.status(400).json({ message: "Missing fields" });
+  const { email, name, role } = req.body || {};
+  if (!email || !name) return sendError(res, 400, "Missing fields");
 
   const existing = await usersCollection.findOne({ email });
-  if (existing) return res.status(409).json({ message: "User already exists" });
+  if (existing) return sendError(res, 409, "User already exists");
 
   const result = await usersCollection.insertOne({
     email,
@@ -441,7 +370,8 @@ app.get("/users", verifyJWT, verifyAllRoles, async (req, res) => {
     const users = await usersCollection.find().toArray();
     res.send(users);
   } catch (err) {
-    res.status(500).send({ message: "Failed to fetch users" });
+    console.error(err);
+    sendError(res, 500, "Failed to fetch users");
   }
 });
 
@@ -450,108 +380,109 @@ app.get("/users/:email", verifyJWT, verifyAllRoles, async (req, res) => {
     const user = await usersCollection.findOne({ email: req.params.email });
     res.send({ exists: !!user });
   } catch (err) {
+    console.error(err);
     res.status(500).send({ error: "Internal Server Error" });
   }
 });
 
 app.patch("/users/:email", verifyJWT, verifyAdmin, async (req, res) => {
   const email = req.params.email;
-  const updatedRole = req.body.role;
-  const result = await db
-    .collection("users")
-    .updateOne({ email }, { $set: { role: updatedRole } });
-  res.send(result);
-});
+  const updatedRole = req.body?.role;
+  if (!updatedRole) return sendError(res, 400, "Role is required");
 
-// ===================== 🔑 Get User Role by Email =====================
-// ✅ Get role of a user by email with fallback
-app.get("/users/role/:email", verifyJWT, verifyAllRoles, async (req, res) => {
-  const email = req.params.email;
   try {
-    const user = await usersCollection.findOne({ email });
-
-    // Always respond with a role — default to "user"
-    const role = user?.role || "user";
-
-    res.json({ role });
+    const result = await db.collection("users").updateOne({ email }, { $set: { role: updatedRole } });
+    res.send(result);
   } catch (err) {
-    console.error("❌ Failed to fetch user role:", err);
-    res.status(500).json({ error: "Internal Server Error" });
+    console.error(err);
+    sendError(res, 500, "Failed to update user role");
   }
 });
 
-// ===================== 📣 Announcements =====================
+// 🔑 Get role of a user by email with fallback "user"
+app.get("/users/role/:email", verifyJWT, verifyAllRoles, async (req, res) => {
+  try {
+    const user = await usersCollection.findOne({ email: req.params.email });
+    const role = user?.role || "user";
+    res.json({ role });
+  } catch (err) {
+    console.error("❌ Failed to fetch user role:", err);
+    sendError(res, 500, "Internal Server Error");
+  }
+});
+
+// 📣 Announcements
 app.post("/announcements", verifyJWT, verifyAdmin, async (req, res) => {
-  const { title, description } = req.body;
-  if (!title || !description)
-    return res.status(400).json({ message: "Title and description required" });
+  const { title, description } = req.body || {};
+  if (!title || !description) return sendError(res, 400, "Title and description required");
 
-  const result = await db.collection("announcements").insertOne({
-    title: title.trim(),
-    description: description.trim(),
-    createdAt: new Date(),
-  });
-
-  res.status(201).json({ insertedId: result.insertedId });
+  try {
+    const result = await db.collection("announcements").insertOne({
+      title: String(title).trim(),
+      description: String(description).trim(),
+      createdAt: new Date(),
+    });
+    res.status(201).json({ insertedId: result.insertedId });
+  } catch (err) {
+    console.error(err);
+    sendError(res, 500, "Failed to create announcement");
+  }
 });
 
 app.get("/announcements", verifyJWT, verifyMemberOrUser, async (req, res) => {
   try {
-    const data = await db
-      .collection("announcements")
-      .find()
-      .sort({ createdAt: -1 })
-      .toArray();
+    const data = await db.collection("announcements").find().sort({ createdAt: -1 }).toArray();
     res.send(data);
   } catch (err) {
-    res.status(500).json({ message: "Failed to fetch announcements" });
+    console.error(err);
+    sendError(res, 500, "Failed to fetch announcements");
   }
 });
 
-// ===================== 💳 Payments =====================
+// 💳 Payments
 app.post("/create-payment-intent", verifyJWT, verifyMember, async (req, res) => {
   try {
-    const { amount } = req.body;
+    const amount = parseInt(req.body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) return sendError(res, 400, "Invalid amount");
+
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: parseInt(amount) * 100,
+      amount: amount * 100,
       currency: "bdt",
       payment_method_types: ["card"],
     });
     res.send(paymentIntent.client_secret);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    sendError(res, 500, err.message || "Payment intent failed");
   }
 });
 
 app.post("/payments", verifyJWT, verifyMember, async (req, res) => {
   try {
-    const payment = req.body;
+    const payment = { ...req.body, createdAt: new Date() };
     const result = await db.collection("payments").insertOne(payment);
     res.status(201).json({ insertedId: result.insertedId });
   } catch (err) {
-    res.status(500).json({ error: "Payment saving failed" });
+    console.error(err);
+    sendError(res, 500, "Payment saving failed");
   }
 });
 
 app.get("/payments/user/:email", verifyJWT, verifyMember, async (req, res) => {
   const email = req.params.email;
-
   try {
-    const payments = await db
-      .collection("payments")
-      .find({ email })
-      .sort({ createdAt: -1 })
-      .toArray();
-
+    const payments = await db.collection("payments").find({ email }).sort({ createdAt: -1 }).toArray();
     res.send(payments);
   } catch (error) {
-    res.status(500).json({ error: "Failed to fetch payments" });
+    console.error(error);
+    sendError(res, 500, "Failed to fetch payments");
   }
 });
 
-// ===================== 🚨 Notices Board =====================
+// 🚨 Notices Board
 app.post("/notices/issue", async (req, res) => {
-  const { userEmail, apartmentId, reason } = req.body;
+  const { userEmail, apartmentId, reason } = req.body || {};
+  if (!userEmail) return sendError(res, 400, "userEmail required");
 
   const noticeCount = await db.collection("notices").countDocuments({
     userEmail,
@@ -571,41 +502,48 @@ app.post("/notices/issue", async (req, res) => {
 
   if (notice.noticeCount >= 3) {
     await db.collection("agreements").deleteOne({ userEmail });
-    await db
-      .collection("users")
-      .updateOne({ email: userEmail }, { $set: { role: "user" } });
+    await db.collection("users").updateOne({ email: userEmail }, { $set: { role: "user" } });
   }
 
   res.status(201).send({ message: "Notice issued", notice });
 });
 
 app.get("/notices/users/:email", verifyJWT, verifyMember, async (req, res) => {
-  const notices = await db
-    .collection("notices")
-    .find({ userEmail: req.params.email })
-    .sort({ date: -1 })
-    .toArray();
-  res.send(notices);
+  try {
+    const notices = await db
+      .collection("notices")
+      .find({ userEmail: req.params.email })
+      .sort({ date: -1 })
+      .toArray();
+    res.send(notices);
+  } catch (e) {
+    console.error(e);
+    sendError(res, 500, "Failed to fetch notices");
+  }
 });
 
-
-// ===================== Buildings =====================
-
+// 🏢 Buildings
 app.get("/buildings", async (req, res) => {
   try {
     const items = await db.collection("buildings").find().sort({ createdAt: -1 }).toArray();
     res.status(200).json(items);
   } catch (err) {
     console.error("❌ Failed to fetch buildings:", err);
-    res.status(500).json({ error: "Failed to fetch buildings" });
+    sendError(res, 500, "Failed to fetch buildings");
   }
 });
 
+// Health + Root
+app.get("/health", (req, res) => res.json({ ok: true, env: NODE_ENV }));
+app.get("/", (req, res) => res.send("Hello TowerTrack World!"));
 
-app.get("/", (req, res) => {
-  res.send("Hello TowerTrack World!");
+// Global minimal error handler (keeps responses consistent)
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err);
+  sendError(res, 500, "Internal Server Error");
 });
 
-app.listen(port, () => {
-  console.log(`🚀 Server running on port ${port}`);
+/* --------------------------------- Listen -------------------------------- */
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
