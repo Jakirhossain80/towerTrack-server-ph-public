@@ -182,7 +182,7 @@ app.get("/coupons", async (req, res) => {
   }
 });
 
-app.post("/coupons", verifyJWT, verifyAdmin, async (req, res) => {
+app.post("/coupons", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     const newCoupon = { ...req.body, createdAt: new Date() };
     const result = await db.collection("coupons").insertOne(newCoupon);
@@ -193,7 +193,7 @@ app.post("/coupons", verifyJWT, verifyAdmin, async (req, res) => {
   }
 });
 
-app.patch("/coupons/:id", verifyJWT, verifyAdmin, async (req, res) => {
+app.patch("/coupons/:id", verifyJWT, verifyAllRoles, async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return sendError(res, 400, "Invalid coupon id");
   try {
@@ -206,7 +206,7 @@ app.patch("/coupons/:id", verifyJWT, verifyAdmin, async (req, res) => {
   }
 });
 
-app.delete("/coupons/:id", verifyJWT, verifyAdmin, async (req, res) => {
+app.delete("/coupons/:id", verifyJWT, verifyAllRoles, async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return sendError(res, 400, "Invalid coupon id");
   try {
@@ -238,7 +238,7 @@ app.post("/validate-coupon", async (req, res) => {
 });
 
 // 🧾 Agreements
-app.post("/agreements", verifyJWT, verifyUser, async (req, res) => {
+app.post("/agreements", verifyJWT, verifyAllRoles, async (req, res) => {
   const { floorNo, blockName, apartmentNo, rent, userEmail, userName } = req.body || {};
   if (!userEmail || !userName) return sendError(res, 400, "Missing user info");
   const existing = await agreementsCollection.findOne({ userEmail });
@@ -255,7 +255,7 @@ app.post("/agreements", verifyJWT, verifyUser, async (req, res) => {
   }
 });
 
-app.get("/agreements", verifyJWT, verifyAdmin, async (req, res) => {
+app.get("/agreements", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     const status = req.query?.status;
     const query = status ? { status } : {};
@@ -267,7 +267,7 @@ app.get("/agreements", verifyJWT, verifyAdmin, async (req, res) => {
   }
 });
 
-app.get("/agreements/member/:email", verifyJWT, verifyMember, async (req, res) => {
+app.get("/agreements/member/:email", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     const agreement = await agreementsCollection.findOne({
       userEmail: { $regex: new RegExp(`^${req.params.email}$`, "i") },
@@ -280,7 +280,7 @@ app.get("/agreements/member/:email", verifyJWT, verifyMember, async (req, res) =
   }
 });
 
-app.patch("/agreements/:id/status", verifyJWT, verifyAdmin, async (req, res) => {
+app.patch("/agreements/:id/status", verifyJWT, verifyAllRoles, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body || {};
   if (!status) return sendError(res, 400, "Status is required");
@@ -325,7 +325,7 @@ app.get("/users/:email", verifyJWT, verifyAllRoles, async (req, res) => {
   }
 });
 
-app.patch("/users/:email", verifyJWT, verifyAdmin, async (req, res) => {
+app.patch("/users/:email", verifyJWT, verifyAllRoles, async (req, res) => {
   const email = req.params.email;
   const updatedRole = req.body?.role;
   if (!updatedRole) return sendError(res, 400, "Role is required");
@@ -339,7 +339,7 @@ app.patch("/users/:email", verifyJWT, verifyAdmin, async (req, res) => {
 });
 
 // 🔑 Get role
-app.get("/users/role/:email", verifyJWT, async (req, res) => {
+app.get("/users/role/:email", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     if (!usersCollection) return res.status(503).json({ error: "Database not ready, try again" });
     const email = req.params.email;
@@ -352,7 +352,7 @@ app.get("/users/role/:email", verifyJWT, async (req, res) => {
 });
 
 // 📣 Announcements
-app.post("/announcements", verifyJWT, verifyAdmin, async (req, res) => {
+app.post("/announcements", verifyJWT, verifyAllRoles, async (req, res) => {
   const { title, description } = req.body || {};
   if (!title || !description) return sendError(res, 400, "Title and description required");
   try {
@@ -368,7 +368,7 @@ app.post("/announcements", verifyJWT, verifyAdmin, async (req, res) => {
   }
 });
 
-app.get("/announcements", verifyJWT, verifyMemberOrUser, async (req, res) => {
+app.get("/announcements", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     const data = await db.collection("announcements").find().sort({ createdAt: -1 }).toArray();
     res.send(data);
@@ -379,7 +379,7 @@ app.get("/announcements", verifyJWT, verifyMemberOrUser, async (req, res) => {
 });
 
 // 💳 Payments
-app.post("/create-payment-intent", verifyJWT, verifyMember, async (req, res) => {
+app.post("/create-payment-intent", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     const amount = parseInt(req.body?.amount);
     if (!Number.isFinite(amount) || amount <= 0) return sendError(res, 400, "Invalid amount");
@@ -395,7 +395,7 @@ app.post("/create-payment-intent", verifyJWT, verifyMember, async (req, res) => 
   }
 });
 
-app.post("/payments", verifyJWT, verifyMember, async (req, res) => {
+app.post("/payments", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     const payment = { ...req.body, createdAt: new Date() };
     const result = await db.collection("payments").insertOne(payment);
@@ -406,7 +406,7 @@ app.post("/payments", verifyJWT, verifyMember, async (req, res) => {
   }
 });
 
-app.get("/payments/user/:email", verifyJWT, verifyMember, async (req, res) => {
+app.get("/payments/user/:email", verifyJWT, async (req, res) => {
   const email = req.params.email;
   try {
     const payments = await db.collection("payments").find({ email }).sort({ createdAt: -1 }).toArray();
@@ -431,7 +431,7 @@ app.post("/notices/issue", async (req, res) => {
   res.status(201).send({ message: "Notice issued", notice });
 });
 
-app.get("/notices/users/:email", verifyJWT, verifyMember, async (req, res) => {
+app.get("/notices/users/:email", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     const notices = await db.collection("notices").find({ userEmail: req.params.email }).sort({ date: -1 }).toArray();
     res.send(notices);
