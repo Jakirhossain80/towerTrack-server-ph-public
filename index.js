@@ -339,7 +339,7 @@ app.patch("/users/:email", verifyJWT, verifyAllRoles, async (req, res) => {
 });
 
 // 🔑 Get role
-app.get("/users/role/:email", verifyJWT, verifyAllRoles, async (req, res) => {
+app.get("/users/role/:email", verifyJWT, async (req, res) => {
   try {
     if (!usersCollection) return res.status(503).json({ error: "Database not ready, try again" });
     const email = req.params.email;
