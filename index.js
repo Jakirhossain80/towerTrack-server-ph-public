@@ -132,10 +132,12 @@ const verifyJWT = (req, res, next) => {
 
 const verifyRole = (roles) => async (req, res, next) => {
   const email = req.decoded?.email;
-  if (!email) return sendError(res, 403, "Forbidden: No user found");
-  const user = await usersCollection.findOne({ email });
-  if (!user) return sendError(res, 404, "User not found");
-  if (roles.includes(user.role)) return next();
+  if (!email) return sendError(res, 401, "Unauthorized");
+
+   const user = await usersCollection.findOne({ email });
+  const effectiveRole = user?.role || "user";
+
+  if (roles.includes(effectiveRole)) return next();
   return sendError(res, 403, `Forbidden: ${roles.join(" or ")} only`);
 };
 
@@ -255,7 +257,7 @@ app.post("/agreements", verifyJWT, verifyAllRoles, async (req, res) => {
   }
 });
 
-app.get("/agreements", verifyJWT, verifyAllRoles, async (req, res) => {
+app.get("/agreements", verifyJWT, verifyAdmin, async (req, res) => {
   try {
     const status = req.query?.status;
     const query = status ? { status } : {};
@@ -267,7 +269,7 @@ app.get("/agreements", verifyJWT, verifyAllRoles, async (req, res) => {
   }
 });
 
-app.get("/agreements/member/:email", verifyJWT, verifyAllRoles, async (req, res) => {
+app.get("/agreements/member/:email", verifyJWT, async (req, res) => {
   try {
     const agreement = await agreementsCollection.findOne({
       userEmail: { $regex: new RegExp(`^${req.params.email}$`, "i") },
@@ -305,7 +307,7 @@ app.post("/users", async (req, res) => {
   res.status(201).json({ insertedId: result.insertedId });
 });
 
-app.get("/users", verifyJWT, verifyAllRoles, async (req, res) => {
+app.get("/users", verifyJWT, verifyAdmin, async (req, res) => {
   try {
     const users = await usersCollection.find().toArray();
     res.send(users);
@@ -368,7 +370,7 @@ app.post("/announcements", verifyJWT, verifyAllRoles, async (req, res) => {
   }
 });
 
-app.get("/announcements", verifyJWT, verifyAllRoles, async (req, res) => {
+app.get("/announcements", verifyJWT, async (req, res) => {
   try {
     const data = await db.collection("announcements").find().sort({ createdAt: -1 }).toArray();
     res.send(data);
