@@ -1,3 +1,4 @@
+// index.js (or api/index.js if you keep your server in /api)
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -25,22 +26,20 @@ const stripe = Stripe(STRIPE_SECRET_KEY);
 const isProd = NODE_ENV === "production";
 
 /* ------------------------------ Middleware ------------------------------ */
-app.set("trust proxy", 1); // play nice behind proxies (Vercel/Render/NGINX)
+app.set("trust proxy", 1);
 app.use(cookieParser());
-
-// tighten JSON body limits a bit (safe default)
 app.use(express.json({ limit: "200kb" }));
 
-// centralize CORS origins (add more via env if you need)
 const ALLOWED_ORIGINS = [
   "https://towertrack-ph-assestwelve.netlify.app",
   "http://localhost:5173",
+  // add your deployed frontend domain here:
+  // "https://your-frontend.vercel.app",
 ];
 
 app.use(
   cors({
     origin: (origin, cb) => {
-      // allow mobile apps / curl (no origin) & allowed origins
       if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
       return cb(new Error("Not allowed by CORS"), false);
     },
@@ -48,30 +47,68 @@ app.use(
   })
 );
 
-/* ------------------------------ DB Client ------------------------------- */
-const client = new MongoClient(MONGODB_URI, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  },
-});
+/* ------------------------- MongoDB (serverless-safe) ------------------------- */
+// Cache the client/promise across serverless invocations
+let cached = globalThis.__towertrack_mongo__;
+if (!cached) {
+  cached = globalThis.__towertrack_mongo__ = { client: null, promise: null };
+}
+
+async function getMongoClient() {
+  if (cached.client) return cached.client;
+  if (!cached.promise) {
+    const client = new MongoClient(MONGODB_URI, {
+      serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
+    });
+    cached.promise = client.connect().then((c) => c);
+  }
+  cached.client = await cached.promise;
+  return cached.client;
+}
 
 let db, apartmentsCollection, agreementsCollection, usersCollection;
+
+async function connectDB() {
+  const client = await getMongoClient();
+  db = client.db("towerTrackDB");
+  apartmentsCollection = db.collection("apartments");
+  agreementsCollection = db.collection("agreements");
+  usersCollection = db.collection("users");
+
+  await Promise.allSettled([
+    agreementsCollection.createIndex({ userEmail: 1 }, { unique: true }),
+    usersCollection.createIndex({ email: 1 }, { unique: true }),
+    db.collection("coupons").createIndex({ code: 1 }, { unique: true }),
+    db.collection("payments").createIndex({ email: 1, createdAt: -1 }),
+    db.collection("announcements").createIndex({ createdAt: -1 }),
+    db.collection("buildings").createIndex({ createdAt: -1 }),
+  ]);
+}
+
+// Ensure DB is ready per request (cheap if already connected)
+async function ensureDB(req, res, next) {
+  try {
+    if (!db) await connectDB();
+    return next();
+  } catch (e) {
+    console.error("DB connection error:", e);
+    return res.status(500).json({ error: "Database connection failed" });
+  }
+}
+app.use(ensureDB);
 
 /* ------------------------- Small Utils / Helpers ------------------------ */
 const cookieOptions = {
   httpOnly: true,
   secure: isProd,
   sameSite: isProd ? "none" : "lax",
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
 const sendError = (res, code, message, extra = {}) =>
   res.status(code).json({ error: message, ...extra });
 
-const generateToken = (email) =>
-  jwt.sign({ email }, JWT_SECRET, { expiresIn: "7d" });
+const generateToken = (email) => jwt.sign({ email }, JWT_SECRET, { expiresIn: "7d" });
 
 const isValidObjectId = (id) => {
   try {
@@ -85,10 +122,8 @@ const isValidObjectId = (id) => {
 const verifyJWT = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) return sendError(res, 401, "Unauthorized");
-
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.decoded = decoded;
+    req.decoded = jwt.verify(token, JWT_SECRET);
     next();
   } catch {
     return sendError(res, 403, "Forbidden");
@@ -98,15 +133,12 @@ const verifyJWT = (req, res, next) => {
 const verifyRole = (roles) => async (req, res, next) => {
   const email = req.decoded?.email;
   if (!email) return sendError(res, 403, "Forbidden: No user found");
-
   const user = await usersCollection.findOne({ email });
   if (!user) return sendError(res, 404, "User not found");
-
   if (roles.includes(user.role)) return next();
   return sendError(res, 403, `Forbidden: ${roles.join(" or ")} only`);
 };
 
-// role helpers preserving original behavior
 const verifyAdmin = verifyRole(["admin"]);
 const verifyMember = verifyRole(["member"]);
 const verifyUser = verifyRole(["user"]);
@@ -117,78 +149,18 @@ const verifyAllRoles = verifyRole(["admin", "member", "user"]);
 app.post("/jwt", async (req, res) => {
   const { email } = req.body || {};
   if (!email) return sendError(res, 400, "Email required");
-
   const token = generateToken(email);
   res.cookie("token", token, cookieOptions);
   res.json({ message: "JWT issued" });
 });
 
 app.post("/logout", (req, res) => {
-  res.clearCookie("token", {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? "none" : "lax",
-  });
+  res.clearCookie("token", { httpOnly: true, secure: isProd, sameSite: isProd ? "none" : "lax" });
   res.status(200).json({ message: "Logged out successfully" });
 });
 
-/* ------------------------------ DB Connect ------------------------------ */
-async function connectDB() {
-  await client.connect();
-  db = client.db("towerTrackDB");
-  apartmentsCollection = db.collection("apartments");
-  agreementsCollection = db.collection("agreements");
-  usersCollection = db.collection("users");
-
-  // helpful indexes (won't break if exist)
-  await Promise.allSettled([
-    agreementsCollection.createIndex({ userEmail: 1 }, { unique: true }),
-    usersCollection.createIndex({ email: 1 }, { unique: true }),
-    db.collection("coupons").createIndex({ code: 1 }, { unique: true }),
-    db.collection("payments").createIndex({ email: 1, createdAt: -1 }),
-    db.collection("announcements").createIndex({ createdAt: -1 }),
-    db.collection("buildings").createIndex({ createdAt: -1 }),
-  ]);
-
-  await cleanDuplicateAgreements();
-  await db.command({ ping: 1 });
-  console.log("✅ MongoDB Connected");
-}
-
-async function cleanDuplicateAgreements() {
-  const duplicates = await agreementsCollection
-    .aggregate([
-      { $group: { _id: "$userEmail", count: { $sum: 1 }, docs: { $push: "$_id" } } },
-      { $match: { count: { $gt: 1 } } },
-    ])
-    .toArray();
-
-  for (const dup of duplicates) {
-    const idsToDelete = dup.docs.slice(1);
-    if (idsToDelete.length) {
-      await agreementsCollection.deleteMany({ _id: { $in: idsToDelete } });
-      console.log(`🧹 Removed ${idsToDelete.length} duplicate agreements for ${dup._id}`);
-    }
-  }
-}
-connectDB().catch((e) => {
-  console.error("❌ DB connection failed:", e);
-  process.exit(1);
-});
-
-// graceful shutdown
-process.on("SIGINT", async () => {
-  try {
-    await client.close();
-    console.log("🔌 MongoDB connection closed");
-    process.exit(0);
-  } catch {
-    process.exit(1);
-  }
-});
-
 /* -------------------------------- Routes -------------------------------- */
-// 🏢 Apartments (public)
+// 🏢 Apartments
 app.get("/apartments", async (req, res) => {
   try {
     const apartments = await apartmentsCollection.find().toArray();
@@ -224,12 +196,8 @@ app.post("/coupons", verifyJWT, verifyAdmin, async (req, res) => {
 app.patch("/coupons/:id", verifyJWT, verifyAdmin, async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return sendError(res, 400, "Invalid coupon id");
-
   try {
-    const result = await db
-      .collection("coupons")
-      .updateOne({ _id: new ObjectId(id) }, { $set: req.body });
-
+    const result = await db.collection("coupons").updateOne({ _id: new ObjectId(id) }, { $set: req.body });
     if (!result.matchedCount) return sendError(res, 404, "Coupon not found");
     res.json({ message: "Coupon updated", modifiedCount: result.modifiedCount });
   } catch (error) {
@@ -241,7 +209,6 @@ app.patch("/coupons/:id", verifyJWT, verifyAdmin, async (req, res) => {
 app.delete("/coupons/:id", verifyJWT, verifyAdmin, async (req, res) => {
   const { id } = req.params;
   if (!isValidObjectId(id)) return sendError(res, 400, "Invalid coupon id");
-
   try {
     const result = await db.collection("coupons").deleteOne({ _id: new ObjectId(id) });
     if (!result.deletedCount) return sendError(res, 404, "Coupon not found");
@@ -255,21 +222,15 @@ app.delete("/coupons/:id", verifyJWT, verifyAdmin, async (req, res) => {
 app.post("/validate-coupon", async (req, res) => {
   const { code } = req.body || {};
   if (!code) return res.status(400).json({ valid: false, message: "Coupon code is required" });
-
   try {
     const coupon = await db.collection("coupons").findOne({ code: String(code).toUpperCase().trim() });
     if (!coupon) return res.status(404).json({ valid: false, message: "Coupon not found" });
-
     const now = new Date();
     const validTill = coupon.validTill ? new Date(coupon.validTill) : null;
     if (validTill && validTill < now) {
       return res.status(400).json({ valid: false, message: "Coupon has expired" });
     }
-
-    return res.status(200).json({
-      valid: true,
-      discountPercentage: coupon.discount,
-    });
+    return res.status(200).json({ valid: true, discountPercentage: coupon.discount });
   } catch (error) {
     console.error("❌ Coupon validation error:", error);
     return res.status(500).json({ valid: false, message: "Internal Server Error" });
@@ -280,23 +241,13 @@ app.post("/validate-coupon", async (req, res) => {
 app.post("/agreements", verifyJWT, verifyUser, async (req, res) => {
   const { floorNo, blockName, apartmentNo, rent, userEmail, userName } = req.body || {};
   if (!userEmail || !userName) return sendError(res, 400, "Missing user info");
-
   const existing = await agreementsCollection.findOne({ userEmail });
   if (existing) return sendError(res, 409, "Already applied");
 
-  const agreement = {
-    userName,
-    userEmail,
-    floorNo,
-    blockName,
-    apartmentNo,
-    rent,
-    status: "pending",
-    createdAt: new Date(),
-  };
-
   try {
-    const result = await agreementsCollection.insertOne(agreement);
+    const result = await agreementsCollection.insertOne({
+      userName, userEmail, floorNo, blockName, apartmentNo, rent, status: "pending", createdAt: new Date(),
+    });
     res.status(201).json({ insertedId: result.insertedId });
   } catch (err) {
     console.error(err);
@@ -334,12 +285,8 @@ app.patch("/agreements/:id/status", verifyJWT, verifyAdmin, async (req, res) => 
   const { status } = req.body || {};
   if (!status) return sendError(res, 400, "Status is required");
   if (!isValidObjectId(id)) return sendError(res, 400, "Invalid agreement id");
-
   try {
-    const result = await agreementsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { status } }
-    );
+    const result = await agreementsCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status } });
     if (!result.matchedCount) return sendError(res, 404, "Agreement not found");
     res.json({ message: "Agreement status updated", modifiedCount: result.modifiedCount });
   } catch (error) {
@@ -352,16 +299,9 @@ app.patch("/agreements/:id/status", verifyJWT, verifyAdmin, async (req, res) => 
 app.post("/users", async (req, res) => {
   const { email, name, role } = req.body || {};
   if (!email || !name) return sendError(res, 400, "Missing fields");
-
   const existing = await usersCollection.findOne({ email });
   if (existing) return sendError(res, 409, "User already exists");
-
-  const result = await usersCollection.insertOne({
-    email,
-    name,
-    role: role || "user",
-  });
-
+  const result = await usersCollection.insertOne({ email, name, role: role || "user" });
   res.status(201).json({ insertedId: result.insertedId });
 });
 
@@ -389,7 +329,6 @@ app.patch("/users/:email", verifyJWT, verifyAdmin, async (req, res) => {
   const email = req.params.email;
   const updatedRole = req.body?.role;
   if (!updatedRole) return sendError(res, 400, "Role is required");
-
   try {
     const result = await db.collection("users").updateOne({ email }, { $set: { role: updatedRole } });
     res.send(result);
@@ -399,20 +338,13 @@ app.patch("/users/:email", verifyJWT, verifyAdmin, async (req, res) => {
   }
 });
 
-// 🔑 Get role of a user by email with fallback "user"
+// 🔑 Get role
 app.get("/users/role/:email", verifyJWT, async (req, res) => {
   try {
-    // DB not ready yet (defensive guard)
-    if (!usersCollection) {
-      return res.status(503).json({ error: "Database not ready, try again" });
-    }
-
+    if (!usersCollection) return res.status(503).json({ error: "Database not ready, try again" });
     const email = req.params.email;
     const user = await usersCollection.findOne({ email });
-
-    // Always respond with a role — default to "user"
-    const role = user?.role || "user";
-    return res.json({ role });
+    return res.json({ role: user?.role || "user" });
   } catch (err) {
     console.error("❌ Failed to fetch user role:", err);
     return res.status(500).json({ error: "Internal Server Error" });
@@ -423,7 +355,6 @@ app.get("/users/role/:email", verifyJWT, async (req, res) => {
 app.post("/announcements", verifyJWT, verifyAdmin, async (req, res) => {
   const { title, description } = req.body || {};
   if (!title || !description) return sendError(res, 400, "Title and description required");
-
   try {
     const result = await db.collection("announcements").insertOne({
       title: String(title).trim(),
@@ -452,7 +383,6 @@ app.post("/create-payment-intent", verifyJWT, verifyMember, async (req, res) => 
   try {
     const amount = parseInt(req.body?.amount);
     if (!Number.isFinite(amount) || amount <= 0) return sendError(res, 400, "Invalid amount");
-
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amount * 100,
       currency: "bdt",
@@ -487,42 +417,23 @@ app.get("/payments/user/:email", verifyJWT, verifyMember, async (req, res) => {
   }
 });
 
-// 🚨 Notices Board
+// 🚨 Notices
 app.post("/notices/issue", async (req, res) => {
   const { userEmail, apartmentId, reason } = req.body || {};
   if (!userEmail) return sendError(res, 400, "userEmail required");
-
-  const noticeCount = await db.collection("notices").countDocuments({
-    userEmail,
-    status: "active",
-  });
-
-  const notice = {
-    userEmail,
-    apartmentId,
-    reason,
-    noticeCount: noticeCount + 1,
-    status: "active",
-    date: new Date(),
-  };
-
+  const noticeCount = await db.collection("notices").countDocuments({ userEmail, status: "active" });
+  const notice = { userEmail, apartmentId, reason, noticeCount: noticeCount + 1, status: "active", date: new Date() };
   await db.collection("notices").insertOne(notice);
-
   if (notice.noticeCount >= 3) {
     await db.collection("agreements").deleteOne({ userEmail });
     await db.collection("users").updateOne({ email: userEmail }, { $set: { role: "user" } });
   }
-
   res.status(201).send({ message: "Notice issued", notice });
 });
 
 app.get("/notices/users/:email", verifyJWT, verifyMember, async (req, res) => {
   try {
-    const notices = await db
-      .collection("notices")
-      .find({ userEmail: req.params.email })
-      .sort({ date: -1 })
-      .toArray();
+    const notices = await db.collection("notices").find({ userEmail: req.params.email }).sort({ date: -1 }).toArray();
     res.send(notices);
   } catch (e) {
     console.error(e);
@@ -545,22 +456,19 @@ app.get("/buildings", async (req, res) => {
 app.get("/health", (req, res) => res.json({ ok: true, env: NODE_ENV }));
 app.get("/", (req, res) => res.send("Hello TowerTrack World!"));
 
-// Global minimal error handler (keeps responses consistent)
+// Minimal global error handler
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   sendError(res, 500, "Internal Server Error");
 });
 
-/* --------------------------------- Listen -------------------------------- */
-async function start() {
-  try {
-    await connectDB();
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-    });
-  } catch (e) {
-    console.error("❌ Failed to start server:", e);
-    process.exit(1);
-  }
+/* ------------------------- Export for Vercel & Local ------------------------- */
+// On Vercel: export the handler (NO app.listen)
+module.exports = app;
+
+// Local dev only
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+  });
 }
-start();
