@@ -145,6 +145,7 @@ const verifyAdmin = verifyRole(["admin"]);
 const verifyMember = verifyRole(["member"]);
 const verifyUser = verifyRole(["user"]);
 const verifyMemberOrUser = verifyRole(["member", "user"]);
+const verifyMemberOrAdmin = verifyRole(["member", "admin"]);
 const verifyAllRoles = verifyRole(["admin", "member", "user"]);
 
 /* --------------------------------- Auth --------------------------------- */
@@ -257,7 +258,7 @@ app.post("/agreements", verifyJWT, verifyAllRoles, async (req, res) => {
   }
 });
 
-app.get("/agreements", verifyJWT, verifyAdmin, async (req, res) => {
+app.get("/agreements", verifyJWT, verifyMemberOrAdmin, async (req, res) => {
   try {
     const status = req.query?.status;
     const query = status ? { status } : {};
@@ -307,7 +308,7 @@ app.post("/users", async (req, res) => {
   res.status(201).json({ insertedId: result.insertedId });
 });
 
-app.get("/users", verifyJWT, verifyAdmin, async (req, res) => {
+app.get("/users", verifyJWT, verifyMemberOrAdmin, async (req, res) => {
   try {
     const users = await usersCollection.find().toArray();
     res.send(users);
