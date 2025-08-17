@@ -10,7 +10,7 @@ const app = express();
 
 /* ----------------------------- Basic Config ----------------------------- */
 const {
-  PORT: port = 3000,
+  PORT = 3000,
   NODE_ENV = "development",
   MONGODB_URI,
   STRIPE_SECRET_KEY,
@@ -555,8 +555,8 @@ app.use((err, req, res, next) => {
 async function start() {
   try {
     await connectDB();
-    app.listen(port, () => {
-      console.log(`🚀 Server running on port ${port}`);
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
     });
   } catch (e) {
     console.error("❌ Failed to start server:", e);
