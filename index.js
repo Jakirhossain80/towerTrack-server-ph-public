@@ -10,7 +10,7 @@ const app = express();
 
 /* ----------------------------- Basic Config ----------------------------- */
 const {
-  PORT = 3000,
+  PORT: port = 3000,
   NODE_ENV = "development",
   MONGODB_URI,
   STRIPE_SECRET_KEY,
@@ -400,14 +400,22 @@ app.patch("/users/:email", verifyJWT, verifyAdmin, async (req, res) => {
 });
 
 // 🔑 Get role of a user by email with fallback "user"
-app.get("/users/role/:email", verifyJWT, verifyAllRoles, async (req, res) => {
+app.get("/users/role/:email", verifyJWT, async (req, res) => {
   try {
-    const user = await usersCollection.findOne({ email: req.params.email });
+    // DB not ready yet (defensive guard)
+    if (!usersCollection) {
+      return res.status(503).json({ error: "Database not ready, try again" });
+    }
+
+    const email = req.params.email;
+    const user = await usersCollection.findOne({ email });
+
+    // Always respond with a role — default to "user"
     const role = user?.role || "user";
-    res.json({ role });
+    return res.json({ role });
   } catch (err) {
     console.error("❌ Failed to fetch user role:", err);
-    sendError(res, 500, "Internal Server Error");
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
@@ -544,6 +552,15 @@ app.use((err, req, res, next) => {
 });
 
 /* --------------------------------- Listen -------------------------------- */
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+async function start() {
+  try {
+    await connectDB();
+    app.listen(port, () => {
+      console.log(`🚀 Server running on port ${port}`);
+    });
+  } catch (e) {
+    console.error("❌ Failed to start server:", e);
+    process.exit(1);
+  }
+}
+start();
