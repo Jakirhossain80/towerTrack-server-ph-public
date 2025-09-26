@@ -308,7 +308,7 @@ app.post("/users", async (req, res) => {
   res.status(201).json({ insertedId: result.insertedId });
 });
 
-app.get("/users", verifyJWT, verifyMemberOrAdmin, async (req, res) => {
+app.get("/users", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     const users = await usersCollection.find().toArray();
     res.send(users);
