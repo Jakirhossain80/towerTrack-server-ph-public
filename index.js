@@ -258,7 +258,7 @@ app.post("/agreements", verifyJWT, verifyAllRoles, async (req, res) => {
   }
 });
 
-app.get("/agreements", verifyJWT, verifyMemberOrAdmin, async (req, res) => {
+app.get("/agreements", verifyJWT, verifyAllRoles, async (req, res) => {
   try {
     const status = req.query?.status;
     const query = status ? { status } : {};
